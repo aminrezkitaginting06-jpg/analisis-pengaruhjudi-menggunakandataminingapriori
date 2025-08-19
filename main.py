@@ -6,7 +6,7 @@ import pandas as pd
 from mlxtend.frequent_patterns import apriori, association_rules
 
 # ===================== KONFIG BOT =====================
-TOKEN = "ISI_TOKEN_BOTMU_DI_SINI"
+TOKEN = "8038423070:AAFv0Qhmmwxf02HTsdwR9LNxMvHqEwNhJ2I"
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
