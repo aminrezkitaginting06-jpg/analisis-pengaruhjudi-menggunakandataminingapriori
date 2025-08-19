@@ -3,6 +3,6 @@ services:
     name: my-python-bot
     env: python
     plan: free
+    runtime: python-3.10.12
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
-    runtime: python-3.10.12
