@@ -3,6 +3,6 @@ services:
     name: analisis-pengaruhjudi
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app.py  # Ganti 'app.py' dengan file utama kamu
     runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
