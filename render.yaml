@@ -2,7 +2,7 @@ services:
   - type: web
     name: analisis-pengaruhjudi
     env: python
-    pythonVersion: 3.11.8
+    pythonVersion: 3.11.8  
     buildCommand: |
       pip install --upgrade pip
       pip install -r requirements.txt
