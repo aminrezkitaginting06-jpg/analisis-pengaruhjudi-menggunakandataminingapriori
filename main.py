@@ -1,10 +1,6 @@
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ConversationHandler,
-    ContextTypes, filters
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
 # ==============================
 # KONFIG
@@ -64,30 +60,9 @@ def format_rekap_text(data: dict) -> str:
         text += "\n"
     return text.strip()
 
-def check_constraints_groups(data: dict) -> list:
-    total = data.get("TOTAL",0)
-    groups_check = {
-        "JK": ["JK1","JK2"],
-        "UMR": ["UMR1","UMR2","UMR3","UMR4","UMR5"],
-        "PT": ["PT1","PT2","PT3","PT4"],
-        "FBJ": ["FBJ1","FBJ2","FBJ3","FBJ4"],
-        "JJ": ["JJ1","JJ2","JJ3","JJ4"],
-        "PDB": ["PDB1","PDB2","PDB3","PDB4"],
-        "MK": ["MK1","MK2"],
-        "FB": ["FB1","FB2","FB3","FB4"],
-        "KJO": ["KJO1","KJO2"],
-        "PJO": ["PJO1","PJO2"],
-    }
-    wrong_groups = []
-    for k, items in groups_check.items():
-        s = sum(data.get(i,0) for i in items)
-        if s != total:
-            wrong_groups.append((k, items))
-    abj_items = [f"ABJ{i}" for i in range(1,6)]
-    abj_total = sum(data.get(i,0) for i in abj_items)
-    if abj_total != data.get("PJO1",0):
-        wrong_groups.append(("ABJ", abj_items))
-    return wrong_groups
+def check_group_sum(data: dict, group_keys: list, expected_sum: int) -> bool:
+    total = sum(data.get(k,0) for k in group_keys)
+    return total == expected_sum
 
 # ==============================
 # HANDLERS
@@ -95,20 +70,11 @@ def check_constraints_groups(data: dict) -> list:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📝 Input Data", callback_data='input')],
-        [InlineKeyboardButton("📋 Rekap Data", callback_data='rekap')]
+        [InlineKeyboardButton("📋 Rekap Data", callback_data='rekap')],
+        [InlineKeyboardButton("🔄 Restart", callback_data='restart')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("👋 Halo! Pilih menu:", reply_markup=reply_markup)
-
-async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    context.user_data["data"] = {}
-    context.user_data["field_idx"] = 0
-    first_field = [k for g in GROUPS for k in g][0]
-    await update.message.reply_text(
-        "🔄 Restart berhasil! Silakan input data dari awal:\n" + FIELD_PROMPTS[first_field]
-    )
-    return ASKING
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -123,48 +89,80 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = context.user_data.get("data",{})
         text = format_rekap_text(data)
         await query.edit_message_text(text)
+    elif query.data == "restart":
+        context.user_data.clear()
+        first_field = [k for g in GROUPS for k in g][0]
+        await query.edit_message_text(f"🔄 Restart berhasil! {FIELD_PROMPTS[first_field]}")
+        context.user_data["field_idx"] = 0
+        context.user_data["data"] = {}
+        return ASKING
 
 async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
+    if "data" not in context.user_data:
+        context.user_data["data"] = {}
     fields = [k for g in GROUPS for k in g]
-    idx = context.user_data.get("field_idx", 0)
+    idx = context.user_data.get("field_idx",0)
     field = fields[idx]
+
     if not is_int_nonneg(text):
         await update.message.reply_text("❌ Harus angka positif. Coba lagi:")
         return ASKING
-    context.user_data.setdefault("data", {})[field] = int(text)
-    idx += 1
-    if idx < len(fields):
-        context.user_data["field_idx"] = idx
-        await update.message.reply_text(FIELD_PROMPTS[fields[idx]])
-        return ASKING
-    wrong_groups = check_constraints_groups(context.user_data["data"])
-    if wrong_groups:
-        first_wrong_field = wrong_groups[0][1][0]
-        idx = fields.index(first_wrong_field)
-        context.user_data["field_idx"] = idx
-        await update.message.reply_text(
-            f"❌ Jumlah data tidak sesuai di grup {wrong_groups[0][0]}. Silakan input ulang:\n"
-            f"{FIELD_PROMPTS[first_wrong_field]}"
-        )
-        return ASKING
-    await update.message.reply_text("✅ Semua data berhasil diinput!")
-    return ConversationHandler.END
+
+    context.user_data["data"][field] = int(text)
+    idx +=1
+
+    # Validasi grup
+    data = context.user_data["data"]
+    # JK Group
+    if field in ("JK1","JK2") and idx >=2:
+        if not check_group_sum(data, ["JK1","JK2"], data.get("TOTAL",0)):
+            await update.message.reply_text("❌ Jumlah JK1+JK2 harus sama dengan TOTAL. Masukkan ulang JK1 & JK2.")
+            context.user_data["field_idx"] = 1  # JK1
+            return ASKING
+    # UMR group
+    if field in ("UMR5",):
+        if not check_group_sum(data, ["UMR1","UMR2","UMR3","UMR4","UMR5"], data.get("TOTAL",0)):
+            await update.message.reply_text("❌ Jumlah UMR harus sama dengan TOTAL. Masukkan ulang UMR1–UMR5.")
+            context.user_data["field_idx"] = 2
+            return ASKING
+    # PT group
+    if field in ("PT4",):
+        if not check_group_sum(data, ["PT1","PT2","PT3","PT4"], data.get("TOTAL",0)):
+            await update.message.reply_text("❌ Jumlah PT harus sama dengan TOTAL. Masukkan ulang PT1–PT4.")
+            context.user_data["field_idx"] = 7
+            return ASKING
+    # ABJ group
+    if field in ("ABJ5",):
+        if not check_group_sum(data, ["ABJ1","ABJ2","ABJ3","ABJ4","ABJ5"], data.get("PJO1",0)):
+            await update.message.reply_text("❌ Jumlah ABJ1–ABJ5 harus sama dengan PJO1. Masukkan ulang ABJ1–ABJ5.")
+            context.user_data["field_idx"] = 31
+            return ASKING
+
+    if idx >= len(fields):
+        await update.message.reply_text("✅ Semua data berhasil diinput!")
+        return ConversationHandler.END
+
+    context.user_data["field_idx"] = idx
+    await update.message.reply_text(FIELD_PROMPTS[fields[idx]])
+    return ASKING
 
 # ==============================
 # MAIN
 # ==============================
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
+
     conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_handler, pattern='input')],
+        entry_points=[CallbackQueryHandler(button_handler, pattern='input|restart')],
         states={ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_handler)]},
         fallbacks=[]
     )
+
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("restart", restart))
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(button_handler, pattern='rekap'))
+
     application.run_polling()
 
 if __name__ == "__main__":
