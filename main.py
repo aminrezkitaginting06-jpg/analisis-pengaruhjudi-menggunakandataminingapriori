@@ -21,7 +21,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAG4TChMmiyG5teVNcn4-zMWOwL7ml
     PJO1, PJO2,
     ABJ1, ABJ2, ABJ3, ABJ4, ABJ5,
     TOTAL,
-) = range(31)
+) = range(32)
 
 # =========================
 # PENYIMPAN DATA
