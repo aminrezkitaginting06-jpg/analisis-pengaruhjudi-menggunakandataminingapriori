@@ -1,4 +1,5 @@
 import os
+import logging
 import csv
 from itertools import combinations
 from typing import List, Dict
@@ -9,12 +10,34 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ContextTypes
 )
 
+from flask import Flask
+import threading
+
 # =========================
 # KONFIG
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "8038423070:AAGMen0EKwhi1Up3rkWKGghg-Jf_cxgM1DI"
+PORT = int(os.getenv("PORT", 10000))  # Render auto assign PORT
 MIN_SUPPORT = 0.30
 
+# =========================
+# LOGGING
+# =========================
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
+
+# =========================
+# FLASK UNTUK KEEP ALIVE
+# =========================
+server = Flask(__name__)
+
+@server.route("/")
+def home():
+    return "✅ Bot jalan permanen di Render", 200
+    
 GROUPS = [
     ("TOTAL",),
     ("JK1", "JK2"),
@@ -196,6 +219,11 @@ def apriori_to_rows(data: Dict[str,int], k:int):
 # HANDLERS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Halo! Bot sudah aktif di Render 🚀")
+
+    async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(update.message.text)
+    
     keyboard = [
         [InlineKeyboardButton("📝 Input Data", callback_data='input')],
         [InlineKeyboardButton("📋 Rekap Data", callback_data='rekap')],
@@ -327,32 +355,23 @@ async def apriori3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt)
     export_text("apriori3.txt", txt)
 
+
 # =========================
-# MAIN
+# MAIN BOT
 # =========================
 def main():
-    # hapus webhook dulu supaya aman
-    bot = Bot(BOT_TOKEN)
-    bot.delete_webhook()
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    application = Application.builder().token(BOT_TOKEN).build()
+    # Command /start
+    app.add_handler(CommandHandler("start", start))
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("input", input_start)],
-        states={ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_handler)]},
-        fallbacks=[CommandHandler("reset", reset)]
-    )
+    # Echo pesan text
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(conv_handler)
-    application.add_handler(CallbackQueryHandler(menu_handler))
-    application.add_handler(CommandHandler("rekap", rekap))
-    application.add_handler(CommandHandler("apriori1", apriori1))
-    application.add_handler(CommandHandler("apriori2", apriori2))
-    application.add_handler(CommandHandler("apriori3", apriori3))
-    application.add_handler(CommandHandler("reset", reset))
+    # Jalanin Flask di thread terpisah
+    threading.Thread(target=lambda: server.run(host="0.0.0.0", port=PORT)).start()
 
-    application.run_polling()
+     app.run_polling()
 
 if __name__=="__main__":
     main()
