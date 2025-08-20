@@ -2,7 +2,8 @@ import os
 import csv
 from itertools import combinations
 from typing import List, Tuple, Dict
-from telegram import Update, Bot
+
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ConversationHandler,
     filters, ContextTypes
@@ -111,26 +112,21 @@ def validate_group(data: Dict[str, int], group_idx: int) -> Tuple[bool, str]:
     group = GROUPS[group_idx]
     if group == ("TOTAL",):
         return True, ""
-    total = data.get("TOTAL", None)
-    if total is None:
-        return False, "TOTAL belum diisi."
-    vals = [data.get(k, None) for k in group]
+    total = data.get("TOTAL")
+    vals = [data.get(k) for k in group]
     if any(v is None for v in vals):
-        return False, "Ada nilai yang belum diisi di grup ini."
+        return False, "Ada nilai yang belum diisi."
     s = sum(vals)
-    if group == GROUPS[-1]:
-        pjo1 = data.get("PJO1", None)
-        if pjo1 is None:
-            return False, "PJO1 belum diisi."
-        if s != pjo1:
-            return False, f"❌ ABJ1..ABJ5 harus = PJO1 ({pjo1}), sekarang = {s}."
+    if group == GROUPS[-1]:  # ABJ
+        if s != data.get("PJO1", 0):
+            return False, f"❌ ABJ harus = PJO1 ({data.get('PJO1',0)}), sekarang={s}."
         return True, ""
-    if group == GROUPS[10]:
+    if group == GROUPS[10]:  # PJO
         if s != total:
-            return False, f"❌ PJO1 + PJO2 harus = TOTAL ({total}), sekarang = {s}."
+            return False, f"❌ PJO1+PJO2 harus = TOTAL ({total}), sekarang={s}."
         return True, ""
     if s != total:
-        return False, f"❌ Jumlah {', '.join(group)} harus = TOTAL ({total}), sekarang = {s}."
+        return False, f"❌ {', '.join(group)} harus = TOTAL ({total}), sekarang={s}."
     return True, ""
 
 def clear_group(user_data: dict, group_idx: int):
@@ -143,130 +139,55 @@ def group_start_index(group_idx: int) -> int:
         idx += len(GROUPS[i])
     return idx
 
-def _all_fields_linear():
-    fields = []
-    for g in GROUPS:
-        fields.extend(g)
-    return fields
-
-# =========================
-# Handlers
-# =========================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Halo! Bot siap.\nPerintah:\n"
-        "/input  → mulai input data responden\n"
-        "/rekap  → tampilkan rekap & kirim file\n"
-        "/apriori1 → hasil 1-itemset\n"
-        "/apriori2 → hasil 2-itemset\n"
-        "/apriori3 → hasil 3-itemset\n"
-        "/reset  → hapus data & mulai ulang"
-    )
-
-async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text("🔄 Data kamu sudah direset. Ketik /input untuk mulai lagi.")
-
-async def input_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    context.user_data["idx"] = 0
-    context.user_data["data"] = {}
-    fields = _all_fields_linear()
-    first_field = fields[0]
-    await update.message.reply_text("📝 Mulai input data responden.\nKetik angka ≥0")
-    await update.message.reply_text(FIELD_PROMPTS[first_field])
-    return ASKING
-
-async def input_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    if not is_int_nonneg(text):
-        await update.message.reply_text("❗ Masukkan angka bulat ≥0. Coba lagi.")
-        return ASKING
-    value = int(text)
-    fields = _all_fields_linear()
-    idx = context.user_data.get("idx", 0)
-    key = fields[idx]
-    context.user_data["data"][key] = value
-    cumulative = 0
-    for gi, g in enumerate(GROUPS):
-        if idx < cumulative + len(g):
-            group_idx = gi
-            in_group_pos = idx - cumulative
-            group_len = len(g)
-            break
-        cumulative += len(g)
-    if in_group_pos == group_len - 1:
-        ok, msg = validate_group(context.user_data["data"], group_idx)
-        if not ok:
-            clear_group(context.user_data["data"], group_idx)
-            context.user_data["idx"] = group_start_index(group_idx)
-            await update.message.reply_text(msg)
-            first_key = GROUPS[group_idx][0]
-            await update.message.reply_text(f"🔁 Ulangi grup: {', '.join(GROUPS[group_idx])}")
-            await update.message.reply_text(FIELD_PROMPTS[first_key])
-            return ASKING
-    idx += 1
-    context.user_data["idx"] = idx
-    if idx >= len(fields):
-        context.user_data["validated"] = True
-        await update.message.reply_text("✅ Input selesai & valid! Gunakan /rekap.")
-        return ConversationHandler.END
-    next_key = fields[idx]
-    await update.message.reply_text(FIELD_PROMPTS[next_key])
-    return ASKING
-
-async def input_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Dibatalkan. Ketik /input untuk mulai lagi.")
-    return ConversationHandler.END
-
 def ensure_validated_data(context: ContextTypes.DEFAULT_TYPE) -> Dict[str, int]:
-    d = {k: 0 for g in GROUPS for k in g}
+    d = {k:0 for g in GROUPS for k in g}
     if "data" in context.user_data:
-        for k, v in context.user_data["data"].items():
-            d[k] = v
+        d.update(context.user_data["data"])
     return d
 
 # =========================
-# Rekap
+# REKAP
 # =========================
-def format_rekap_text(d: Dict[str, int]) -> str:
-    val = lambda k: d.get(k, 0)
-    return "\n".join([f"{ITEM_LABELS.get(k,k)}: {val(k)}" for g in GROUPS for k in g])
+def format_rekap_text(d: Dict[str,int]) -> str:
+    val = lambda k: d.get(k,0)
+    text = "📋 Berikut rekap data yang telah kamu input:\n\n"
+    for k in ITEM_LABELS:
+        text += f"{ITEM_LABELS[k]}: {val(k)}\n"
+    text = f"📊 TOTAL: {val('TOTAL')}\n" + text
+    return text
 
-def rekap_rows_csv(d: Dict[str, int]) -> List[List[str]]:
+def rekap_rows_csv(d: Dict[str,int]) -> List[List[str]]:
     rows = []
-    for g in GROUPS:
-        for k in g:
-            label = ITEM_LABELS.get(k,k)
-            rows.append([label,str(d.get(k,0))])
+    for k in ["TOTAL"] + [x for g in GROUPS[1:] for x in g]:
+        label = "📊 TOTAL" if k=="TOTAL" else ITEM_LABELS.get(k,k)
+        rows.append([label, str(d.get(k,0))])
     return rows
 
 async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     d = ensure_validated_data(context)
     for gi in range(len(GROUPS)):
         ok, msg = validate_group(d, gi)
-        if not ok and GROUPS[gi] != ("TOTAL",):
-            await update.message.reply_text("⚠️ Data belum valid. Jalankan /input untuk melengkapi.")
+        if not ok and GROUPS[gi]!=("TOTAL",):
+            await update.message.reply_text("⚠️ Data belum valid. Jalankan /input.")
             return
     text = format_rekap_text(d)
     await update.message.reply_text(text)
     export_text("rekap.txt", text)
     await update.message.reply_document(open("rekap.txt","rb"))
-    rows = rekap_rows_csv(d)
-    export_rows_to_csv("rekap.csv", ["Item","Jumlah"], rows)
+    export_rows_to_csv("rekap.csv", ["Item","Jumlah"], rekap_rows_csv(d))
     await update.message.reply_document(open("rekap.csv","rb"))
 
 # =========================
-# Apriori
+# APRIORI
 # =========================
-def one_itemset(data: Dict[str,int]) -> List[Tuple[Tuple[str,...],int,float,bool]]:
+def one_itemset(data: Dict[str,int]):
     total = data["TOTAL"]
-    out=[]
+    result=[]
     for k,v in data.items():
         if k=="TOTAL": continue
         support = v/total if total>0 else 0
-        out.append(((k,),v,support,support>=MIN_SUPPORT))
-    return out
+        result.append(((k,),v,support,support>=MIN_SUPPORT))
+    return result
 
 def k_itemset_from_candidates(data: Dict[str,int], candidates: List[Tuple[str,...]]):
     total = data["TOTAL"]
@@ -280,55 +201,159 @@ def k_itemset_from_candidates(data: Dict[str,int], candidates: List[Tuple[str,..
 def apriori_generate_candidates(prev_frequents: List[Tuple[str,...]], k:int):
     prev_sorted = [tuple(sorted(x)) for x in prev_frequents]
     prev_sorted = sorted(set(prev_sorted))
-    candidates = set()
+    candidates=set()
     for i in range(len(prev_sorted)):
         for j in range(i+1,len(prev_sorted)):
-            a,b = prev_sorted[i], prev_sorted[j]
+            a,b=prev_sorted[i],prev_sorted[j]
             if a[:k-2]==b[:k-2]:
-                new=tuple(sorted(set(a)|set(b)))
+                new = tuple(sorted(set(a)|set(b)))
                 if len(new)==k:
                     all_subfreq=True
                     for sub in combinations(new,k-1):
                         if tuple(sorted(sub)) not in prev_sorted:
                             all_subfreq=False
                             break
-                    if all_subfreq:
-                        candidates.add(new)
+                    if all_subfreq: candidates.add(new)
     return sorted(candidates)
 
 def apriori_to_rows(data: Dict[str,int], k:int):
     if k==1:
-        result=one_itemset(data)
+        result = one_itemset(data)
     else:
         prev_rows, prev_freq = apriori_to_rows(data,k-1)
         candidates = apriori_generate_candidates(prev_freq,k)
-        result=k_itemset_from_candidates(data,candidates)
+        result = k_itemset_from_candidates(data,candidates)
     rows=[]
     frequents=[]
     total = data["TOTAL"]
     for combo,freq,support,is_freq in result:
-        labels=" + ".join(ITEM_LABELS[c] for c in combo)
-        rows.append([labels,f"{freq}/{total} = {support:.2f}","YES" if is_freq else "NO"])
-        if is_freq:
-            frequents.append(combo)
+        labels = " + ".join(ITEM_LABELS[c] for c in combo)
+        rows.append([labels, f"{freq}/{total}={support:.2f}", "YES" if is_freq else "NO"])
+        if is_freq: frequents.append(combo)
     return rows, frequents
 
 async def apriori_generic(update: Update, context: ContextTypes.DEFAULT_TYPE, k:int):
-    d=ensure_validated_data(context)
+    d = ensure_validated_data(context)
     for gi in range(len(GROUPS)):
-        ok,msg=validate_group(d,gi)
-        if not ok and GROUPS[gi] != ("TOTAL",):
-            await update.message.reply_text("⚠️ Data belum valid. Jalankan /input untuk melengkapi.")
+        ok,_=validate_group(d,gi)
+        if not ok and GROUPS[gi]!=("TOTAL",):
+            await update.message.reply_text("⚠️ Data belum valid. Jalankan /input.")
             return
-    rows, frequents=apriori_to_rows(d,k)
-    preview="\n".join([f"{r[0]} → {r[1]}" for r in rows[:30]]) or "Tidak ada kombinasi."
-    await update.message.reply_text(f"📊 Hasil {k}-Itemset (Support ≥ {int(MIN_SUPPORT*100)}%)\n\n{preview}\n\n(Detail lengkap dikirim sebagai file CSV & TXT.)")
+    title = f"📊 Hasil Perhitungan {k}-Itemset (Support ≥ {int(MIN_SUPPORT*100)}%)"
+    rows,frequents = apriori_to_rows(d,k)
+    preview="\n".join([f"{r[0]} → {r[1]} ({r[2]})" for r in rows[:30]]) or "Tidak ada kombinasi."
+    await update.message.reply_text(f"{title}\n\n{preview}\n\n(Detail lengkap dikirim sebagai file CSV & TXT.)")
     fname=f"apriori{k}"
-    export_rows_to_csv(fname+".csv", ["Itemset","Support","Valid"], rows)
-    export_text(fname+".txt","\n".join([f"{r[0]} | {r[1]} | {r[2]}" for r in rows]))
+    export_rows_to_csv(fname+".csv",["Itemset","Support","Valid"],rows)
     await update.message.reply_document(open(fname+".csv","rb"))
+    export_text(fname+".txt","\n".join([f"{r[0]} | {r[1]} | {r[2]}" for r in rows]))
     await update.message.reply_document(open(fname+".txt","rb"))
 
 async def apriori1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await apriori_generic(update,context,1)
-async def apriori2(update: Update,
+async def apriori2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await apriori_generic(update,context,2)
+async def apriori3(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await apriori_generic(update,context,3)
+
+# =========================
+# INPUT CONVERSATION
+# =========================
+def _all_fields_linear():
+    fields=[]
+    for g in GROUPS:
+        fields.extend(g)
+    return fields
+
+async def input_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    context.user_data["idx"]=0
+    context.user_data["data"]={}
+    fields=_all_fields_linear()
+    await update.message.reply_text("📝 Mulai input data responden.\nKetik angka (bilangan bulat ≥ 0).")
+    await update.message.reply_text(FIELD_PROMPTS[fields[0]])
+    return ASKING
+
+async def input_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text=update.message.text.strip()
+    if not is_int_nonneg(text):
+        await update.message.reply_text("❗ Masukkan angka bulat ≥ 0. Coba lagi.")
+        return ASKING
+    value=int(text)
+    fields=_all_fields_linear()
+    idx=context.user_data.get("idx",0)
+    key=fields[idx]
+    context.user_data["data"][key]=value
+    cumulative=0
+    for gi,g in enumerate(GROUPS):
+        if idx<cumulative+len(g):
+            group_idx=gi
+            in_group_pos=idx-cumulative
+            group_len=len(g)
+            break
+        cumulative+=len(g)
+    if in_group_pos==group_len-1:
+        ok,msg=validate_group(context.user_data["data"],group_idx)
+        if not ok:
+            clear_group(context.user_data["data"],group_idx)
+            context.user_data["idx"]=group_start_index(group_idx)
+            await update.message.reply_text(msg)
+            await update.message.reply_text(f"🔁 Ulangi pengisian grup: {', '.join(GROUPS[group_idx])}")
+            await update.message.reply_text(FIELD_PROMPTS[GROUPS[group_idx][0]])
+            return ASKING
+    idx+=1
+    context.user_data["idx"]=idx
+    if idx>=len(fields):
+        context.user_data["validated"]=True
+        await update.message.reply_text("✅ Input selesai & valid! Gunakan /rekap untuk melihat ringkasan.")
+        return ConversationHandler.END
+    next_key=fields[idx]
+    await update.message.reply_text(FIELD_PROMPTS[next_key])
+    return ASKING
+
+async def input_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Dibatalkan. Ketik /input untuk mulai lagi.")
+    return ConversationHandler.END
+
+# =========================
+# COMMANDS
+# =========================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Halo! Bot siap.\n\n"
+        "Perintah:\n"
+        "/input → mulai input data responden\n"
+        "/rekap → tampilkan rekap & kirim rekap.csv + rekap.txt\n"
+        "/apriori1 → hasil 1-itemset\n"
+        "/apriori2 → hasil 2-itemset\n"
+        "/apriori3 → hasil 3-itemset\n"
+        "/reset → reset semua data"
+    )
+
+async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text("♻️ Data di-reset. Ketik /input untuk mulai lagi.")
+
+# =========================
+# MAIN
+# =========================
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("input",input_start)],
+        states={ASKING:[MessageHandler(filters.TEXT&~filters.COMMAND,input_ask)]},
+        fallbacks=[CommandHandler("cancel",input_cancel)],
+        name="input_conv",
+        persistent=False
+    )
+    app.add_handler(CommandHandler("start",start))
+    app.add_handler(CommandHandler("reset",reset))
+    app.add_handler(conv)
+    app.add_handler(CommandHandler("rekap",rekap))
+    app.add_handler(CommandHandler("apriori1",apriori1))
+    app.add_handler(CommandHandler("apriori2",apriori2))
+    app.add_handler(CommandHandler("apriori3",apriori3))
+    app.run_polling()
+
+if __name__=="__main__":
+    main()
