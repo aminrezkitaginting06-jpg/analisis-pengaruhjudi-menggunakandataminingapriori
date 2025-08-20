@@ -5,14 +5,8 @@ from telegram.ext import (
     CallbackQueryHandler, ConversationHandler,
     ContextTypes, filters
 )
-from flask import Flask
-import threading
 
-# ==============================
-# KONFIG
-# ==============================
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAG4TChMmiyG5teVNcn4-zMWOwL7mlMmMd0"
-PORT = int(os.getenv("PORT", 10000))
 ASKING = 1
 
 GROUPS = [
@@ -47,19 +41,6 @@ ITEM_LABELS = {
 
 FIELD_PROMPTS = {k: f"Masukkan nilai untuk {v}:" for k,v in ITEM_LABELS.items()}
 
-# ==============================
-# FLASK KEEP ALIVE
-# ==============================
-app = Flask(__name__)
-@app.route('/')
-def home():
-    return "Bot is running!"
-def run_flask():
-    app.run(host="0.0.0.0", port=PORT)
-
-# ==============================
-# UTILS
-# ==============================
 def is_int_nonneg(text: str) -> bool:
     try:
         return int(text) >= 0
@@ -93,18 +74,12 @@ def check_constraints_groups(data: dict) -> list:
         s = sum(data.get(i,0) for i in items)
         if s != total:
             wrong_groups.append((k, items))
-    
-    # cek ABJ
     abj_items = [f"ABJ{i}" for i in range(1,6)]
     abj_total = sum(data.get(i,0) for i in abj_items)
     if abj_total != data.get("PJO1",0):
         wrong_groups.append(("ABJ", abj_items))
-    
     return wrong_groups
 
-# ==============================
-# HANDLERS
-# ==============================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📝 Input Data", callback_data='input')],
@@ -112,6 +87,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("👋 Halo! Pilih menu:", reply_markup=reply_markup)
+
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    context.user_data["data"] = {}
+    context.user_data["field_idx"] = 0
+    first_field = [k for g in GROUPS for k in g][0]
+    await update.message.reply_text(
+        "🔄 Restart berhasil! Silakan input data dari awal:\n" + FIELD_PROMPTS[first_field]
+    )
+    return ASKING
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -132,54 +117,39 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fields = [k for g in GROUPS for k in g]
     idx = context.user_data.get("field_idx", 0)
     field = fields[idx]
-
     if not is_int_nonneg(text):
         await update.message.reply_text("❌ Harus angka positif. Coba lagi:")
         return ASKING
-
-    # simpan data
     context.user_data.setdefault("data", {})[field] = int(text)
     idx += 1
-
-    # cek apakah masih ada field berikutnya
     if idx < len(fields):
         context.user_data["field_idx"] = idx
         await update.message.reply_text(FIELD_PROMPTS[fields[idx]])
         return ASKING
-
-    # semua data diinput, cek constraints
     wrong_groups = check_constraints_groups(context.user_data["data"])
     if wrong_groups:
-        # ambil field pertama dari grup salah
         first_wrong_field = wrong_groups[0][1][0]
         idx = fields.index(first_wrong_field)
         context.user_data["field_idx"] = idx
         await update.message.reply_text(
-            f"❌ Jumlah data tidak sesuai di grup {wrong_groups[0][0]}. Silakan input ulang:"
-            f"\n{FIELD_PROMPTS[first_wrong_field]}"
+            f"❌ Jumlah data tidak sesuai di grup {wrong_groups[0][0]}. Silakan input ulang:\n"
+            f"{FIELD_PROMPTS[first_wrong_field]}"
         )
         return ASKING
-
     await update.message.reply_text("✅ Semua data berhasil diinput!")
     return ConversationHandler.END
 
-# ==============================
-# MAIN
-# ==============================
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
-
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(button_handler, pattern='input')],
         states={ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_handler)]},
         fallbacks=[]
     )
-
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("restart", restart))
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(button_handler, pattern='rekap'))
-
-    threading.Thread(target=run_flask).start()
     application.run_polling()
 
 if __name__ == "__main__":
