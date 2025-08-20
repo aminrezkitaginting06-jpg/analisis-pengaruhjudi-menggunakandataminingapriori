@@ -1,4 +1,2 @@
-python-telegram-bot==20.3
-pandas
-openpyxl
-matplotlib
+python-telegram-bot==20.5
+Flask==2.3.3
