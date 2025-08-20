@@ -90,27 +90,22 @@ async def input_subcategories_handler(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text(f"⚠️ Jumlah input salah! {category_name} memiliki {len(subcats)} subkategori: {', '.join(subcats)}")
         return INPUT_SUBCATEGORIES
 
-    # Validasi total kecuali ABJ dan PJO1
     if category_name not in ["📊 ABJ", "🎯 PJO1"] and sum(values) != total:
         await update.message.reply_text(f"⚠️ Total {category_name} = {sum(values)} tidak sama dengan TOTAL = {total}")
         return INPUT_SUBCATEGORIES
 
-    # Simpan data
     for sub, val in zip(subcats, values):
         context.user_data[sub] = val
 
-    # Next category
     idx += 1
     context.user_data['category_index'] = idx
     if idx >= len(CATEGORIES):
-        # Validasi ABJ = PJO1
         sum_abj = sum([context.user_data.get(sub,0) for sub in CATEGORIES[-1][1]])
         pjo1 = context.user_data.get('PJO1',0)
         if sum_abj != pjo1:
-            context.user_data['category_index'] = idx-1  # ulang ABJ
+            context.user_data['category_index'] = idx-1
             await update.message.reply_text(f"⚠️ Jumlah 📊 ABJ = {sum_abj} harus sama dengan 🎯 PJO1 = {pjo1}. Masukkan ulang ABJ:")
             return INPUT_SUBCATEGORIES
-
         await update.message.reply_text("✅ Semua data valid! Kembali ke menu utama atau lihat rekap.")
         return MENU
     else:
@@ -161,8 +156,8 @@ def main():
             INPUT_TOTAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_total_handler)],
             INPUT_SUBCATEGORIES: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_subcategories_handler)]
         },
-        fallbacks=[CommandHandler('cancel', lambda u,c: ConversationHandler.END)],
-        per_message=True
+        fallbacks=[CommandHandler('cancel', lambda u,c: ConversationHandler.END)]
+        # per_message=True dihapus
     )
 
     app.add_handler(conv_handler)
