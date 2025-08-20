@@ -1,9 +1,6 @@
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ConversationHandler,
-    CallbackQueryHandler, MessageHandler, filters, ContextTypes
-)
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, ConversationHandler, CallbackQueryHandler, filters, ContextTypes
 
 # =========================
 # KONFIG
@@ -11,156 +8,123 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAG4TChMmiyG5teVNcn4-zMWOwL7mlMmMd0"
 
 # =========================
-# STATES
+# STATE INPUT
 # =========================
-MENU, INPUT_TOTAL, INPUT_SUBCATEGORIES = range(3)
+(
+    PT1, PT2, PT3, PT4,
+    FBJ1, FBJ2, FBJ3, FBJ4,
+    JJ1, JJ2, JJ3, JJ4,
+    PDB1, PDB2, PDB3, PDB4,
+    MK1, MK2,
+    FB1, FB2, FB3, FB4,
+    KJO1, KJO2,
+    PJO1, PJO2,
+    ABJ1, ABJ2, ABJ3, ABJ4, ABJ5,
+    TOTAL,
+) = range(31)
 
 # =========================
-# KATEGORI & SUBKATEGORI + EMOJI
+# PENYIMPAN DATA
 # =========================
-CATEGORIES = [
-    ("👩‍👩‍👦 JK", ["JK1", "JK2"]),
-    ("🎂 UMR", ["UMR1","UMR2","UMR3","UMR4","UMR5"]),
-    ("🧑‍💼 PT", ["PT1","PT2"]),
-    ("📚 FBJ", ["FBJ1","FBJ2"]),
-    ("🏃 JJ", ["JJ1","JJ2"]),
-    ("💰 PDB", ["PDB1","PDB2"]),
-    ("🏫 MK", ["MK1","MK2"]),
-    ("🎨 FB", ["FB1","FB2"]),
-    ("⚙️ KJO", ["KJO1","KJO2"]),
-    ("🛠️ PBJO", ["PBJO1","PBJO2"]),
-    ("🎯 PJO1", ["PJO1"]),
-    ("📊 ABJ", ["ABJ1","ABJ2","ABJ3","ABJ4","ABJ5"])
-]
+user_data_store = {}
 
 # =========================
-# HANDLER
+# START
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🔹 Mulai Input Data", callback_data='start_input')],
-        [InlineKeyboardButton("📋 Lihat Rekap", callback_data='rekap')],
-        [InlineKeyboardButton("❌ Keluar", callback_data='cancel')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("👋 Selamat datang!\nSilakan pilih menu:", reply_markup=reply_markup)
-    return MENU
+    user_data_store[update.effective_chat.id] = {}
+    await update.message.reply_text("📋 Masukkan jumlah TOTAL data:")
+    return TOTAL
 
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+# =========================
+# FUNGSI SIMPAN INPUT
+# =========================
+async def save_input(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, next_state: int, prompt: str):
+    user_data_store[update.effective_chat.id][key] = int(update.message.text)
+    await update.message.reply_text(prompt)
+    return next_state
 
-    if query.data == 'start_input':
-        context.user_data.clear()
-        await query.edit_message_text("📝 Masukkan Total Keseluruhan Data (angka):")
-        context.user_data['category_index'] = 0
-        return INPUT_TOTAL
-    elif query.data == 'rekap':
-        await display_rekap(update, context)
-        return MENU
-    elif query.data == 'cancel':
-        await query.edit_message_text("❌ Conversation dibatalkan. Ketik /start untuk mulai lagi.")
-        return ConversationHandler.END
+# =========================
+# VALIDASI
+# =========================
+def validate_data(data: dict):
+    total = data.get("TOTAL", 0)
 
-async def input_total_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    if not text.isdigit():
-        await update.message.reply_text("⚠️ Mohon masukkan angka valid untuk Total Keseluruhan Data!")
-        return INPUT_TOTAL
+    checks = []
 
-    context.user_data['TOTAL'] = int(text)
-    context.user_data['category_index'] = 0
-    category_name = CATEGORIES[0][0]
-    num_subs = len(CATEGORIES[0][1])
-    await update.message.reply_text(f"✅ Total data disimpan: {text}\nMasukkan nilai subkategori {category_name} ({num_subs} angka, jumlah harus sama dengan total)")
-    return INPUT_SUBCATEGORIES
+    # Semua kategori selain ABJ harus sama dengan TOTAL
+    kategori = ["PT", "FBJ", "JJ", "PDB", "MK", "FB", "KJO", "PJO"]
+    for k in kategori:
+        keys = [x for x in data.keys() if x.startswith(k)]
+        jumlah = sum(data.get(x, 0) for x in keys)
+        if jumlah != total:
+            checks.append(f"❌ {k} tidak valid (jumlah={jumlah}, harus={total})")
 
-async def input_subcategories_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    total = context.user_data['TOTAL']
-    idx = context.user_data.get('category_index', 0)
-    category_name, subcats = CATEGORIES[idx]
+    # ABJ validasi khusus
+    abj_total = sum(data.get(f"ABJ{i}", 0) for i in range(1, 6))
+    if abj_total != data.get("PJO1", 0):
+        checks.append(f"❌ ABJ tidak valid (jumlah={abj_total}, harus={data.get('PJO1', 0)})")
 
-    try:
-        values = [int(x.strip()) for x in update.message.text.strip().split()]
-    except:
-        await update.message.reply_text("⚠️ Masukkan angka valid, pisahkan dengan spasi!")
-        return INPUT_SUBCATEGORIES
+    return checks
 
-    if len(values) != len(subcats):
-        await update.message.reply_text(f"⚠️ Jumlah input salah! {category_name} memiliki {len(subcats)} subkategori: {', '.join(subcats)}")
-        return INPUT_SUBCATEGORIES
+# =========================
+# HASIL REKAP
+# =========================
+def format_output(data: dict):
+    return (
+        f"📊 Hasil Rekap Data\n\n"
+        f"📋 Total: {data.get('TOTAL', 0)}\n\n"
+        f"🏫 PT: {data.get('PT1', 0)}, {data.get('PT2', 0)}, {data.get('PT3', 0)}, {data.get('PT4', 0)}\n"
+        f"📚 FBJ: {data.get('FBJ1', 0)}, {data.get('FBJ2', 0)}, {data.get('FBJ3', 0)}, {data.get('FBJ4', 0)}\n"
+        f"🎓 JJ: {data.get('JJ1', 0)}, {data.get('JJ2', 0)}, {data.get('JJ3', 0)}, {data.get('JJ4', 0)}\n"
+        f"🧑‍💼 PDB: {data.get('PDB1', 0)}, {data.get('PDB2', 0)}, {data.get('PDB3', 0)}, {data.get('PDB4', 0)}\n"
+        f"📖 MK: {data.get('MK1', 0)}, {data.get('MK2', 0)}\n"
+        f"👥 FB: {data.get('FB1', 0)}, {data.get('FB2', 0)}, {data.get('FB3', 0)}, {data.get('FB4', 0)}\n"
+        f"🏢 KJO: {data.get('KJO1', 0)}, {data.get('KJO2', 0)}\n"
+        f"📌 PJO: {data.get('PJO1', 0)}, {data.get('PJO2', 0)}\n"
+        f"📝 ABJ: {data.get('ABJ1', 0)}, {data.get('ABJ2', 0)}, {data.get('ABJ3', 0)}, {data.get('ABJ4', 0)}, {data.get('ABJ5', 0)}\n"
+    )
 
-    if category_name not in ["📊 ABJ", "🎯 PJO1"] and sum(values) != total:
-        await update.message.reply_text(f"⚠️ Total {category_name} = {sum(values)} tidak sama dengan TOTAL = {total}")
-        return INPUT_SUBCATEGORIES
+# =========================
+# VALIDASI & AUTO OUTPUT
+# =========================
+async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = user_data_store.get(update.effective_chat.id, {})
 
-    for sub, val in zip(subcats, values):
-        context.user_data[sub] = val
-
-    idx += 1
-    context.user_data['category_index'] = idx
-    if idx >= len(CATEGORIES):
-        sum_abj = sum([context.user_data.get(sub,0) for sub in CATEGORIES[-1][1]])
-        pjo1 = context.user_data.get('PJO1',0)
-        if sum_abj != pjo1:
-            context.user_data['category_index'] = idx-1
-            await update.message.reply_text(f"⚠️ Jumlah 📊 ABJ = {sum_abj} harus sama dengan 🎯 PJO1 = {pjo1}. Masukkan ulang ABJ:")
-            return INPUT_SUBCATEGORIES
-        await update.message.reply_text("✅ Semua data valid! Kembali ke menu utama atau lihat rekap.")
-        return MENU
+    errors = validate_data(data)
+    if errors:
+        msg = "⚠️ Data tidak valid:\n" + "\n".join(errors)
+        await update.message.reply_text(msg)
     else:
-        next_category_name, next_subcats = CATEGORIES[idx]
-        await update.message.reply_text(f"Masukkan nilai subkategori {next_category_name} ({len(next_subcats)} angka, jumlah harus = {total})")
-        return INPUT_SUBCATEGORIES
+        await update.message.reply_text("✅ Data valid!")
 
-async def display_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = context.user_data
-    if not data:
-        await update.callback_query.edit_message_text("⚠️ Belum ada data yang diinput.")
-        return
-
-    text = "📋 *Rekap Data User*\n\n"
-    total = data.get('TOTAL',0)
-    text += f"📊 Total Keseluruhan Data: {total}\n\n"
-
-    for cat_name, subcats in CATEGORIES:
-        vals = [str(data.get(sub,0)) for sub in subcats]
-        text += f"{cat_name}: " + " | ".join(vals) + f" (Jumlah: {sum([int(v) for v in vals])})\n"
-
-    keyboard = [
-        [InlineKeyboardButton("🔄 Restart Input", callback_data='start_input')],
-        [InlineKeyboardButton("↩ Kembali ke Menu", callback_data='back_menu')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
-
-async def back_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await start(update, context)
-    return MENU
+    # langsung auto tampilkan hasil rekap
+    await update.message.reply_text(format_output(data))
+    return ConversationHandler.END
 
 # =========================
 # MAIN
 # =========================
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[CommandHandler("start", start)],
         states={
-            MENU: [
-                CallbackQueryHandler(menu_handler, pattern='^(start_input|rekap|cancel)$'),
-                CallbackQueryHandler(back_menu_handler, pattern='^back_menu$')
-            ],
-            INPUT_TOTAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_total_handler)],
-            INPUT_SUBCATEGORIES: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_subcategories_handler)]
+            TOTAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: save_input(u, c, "TOTAL", PT1, "🏫 Masukkan PT1:"))],
+            PT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: save_input(u, c, "PT1", PT2, "🏫 Masukkan PT2:"))],
+            PT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: save_input(u, c, "PT2", PT3, "🏫 Masukkan PT3:"))],
+            PT3: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: save_input(u, c, "PT3", PT4, "🏫 Masukkan PT4:"))],
+            PT4: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: save_input(u, c, "PT4", FBJ1, "📚 Masukkan FBJ1:"))],
+            # tambahin semua step lain sesuai urutan (FBJ1 → FBJ4 → JJ1 → ... → ABJ5)
+            ABJ5: [MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: save_input(u, c, "ABJ5", ConversationHandler.END, "✅ Semua data masuk, sedang validasi..."))],
         },
-        fallbacks=[CommandHandler('cancel', lambda u,c: ConversationHandler.END)]
-        # per_message=True dihapus
+        fallbacks=[],
     )
 
     app.add_handler(conv_handler)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, done))  # auto validasi setelah selesai
+
     app.run_polling()
 
 if __name__ == "__main__":
