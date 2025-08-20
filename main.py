@@ -259,6 +259,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("♻️ Data berhasil direset.")
+    return ConversationHandler.END 
 
 async def input_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["data"] = {}
