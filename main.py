@@ -11,7 +11,7 @@ import threading
 # ==============================
 # KONFIG
 # ==============================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8038423070:AAGMen0EKwhi1Up3rkWKGghg-Jf_cxgM1DI"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAG4TChMmiyG5teVNcn4-zMWOwL7mlMmMd0"
 PORT = int(os.getenv("PORT", 10000))
 ASKING = 1
 
@@ -74,6 +74,34 @@ def format_rekap_text(data: dict) -> str:
         text += "\n"
     return text.strip()
 
+def check_constraints_groups(data: dict) -> list:
+    total = data.get("TOTAL",0)
+    groups_check = {
+        "JK": ["JK1","JK2"],
+        "UMR": ["UMR1","UMR2","UMR3","UMR4","UMR5"],
+        "PT": ["PT1","PT2","PT3","PT4"],
+        "FBJ": ["FBJ1","FBJ2","FBJ3","FBJ4"],
+        "JJ": ["JJ1","JJ2","JJ3","JJ4"],
+        "PDB": ["PDB1","PDB2","PDB3","PDB4"],
+        "MK": ["MK1","MK2"],
+        "FB": ["FB1","FB2","FB3","FB4"],
+        "KJO": ["KJO1","KJO2"],
+        "PJO": ["PJO1","PJO2"],
+    }
+    wrong_groups = []
+    for k, items in groups_check.items():
+        s = sum(data.get(i,0) for i in items)
+        if s != total:
+            wrong_groups.append((k, items))
+    
+    # cek ABJ
+    abj_items = [f"ABJ{i}" for i in range(1,6)]
+    abj_total = sum(data.get(i,0) for i in abj_items)
+    if abj_total != data.get("PJO1",0):
+        wrong_groups.append(("ABJ", abj_items))
+    
+    return wrong_groups
+
 # ==============================
 # HANDLERS
 # ==============================
@@ -101,26 +129,39 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    if "data" not in context.user_data:
-        context.user_data["data"] = {}
     fields = [k for g in GROUPS for k in g]
-    idx = context.user_data.get("field_idx",0)
+    idx = context.user_data.get("field_idx", 0)
     field = fields[idx]
 
     if not is_int_nonneg(text):
         await update.message.reply_text("❌ Harus angka positif. Coba lagi:")
         return ASKING
 
-    context.user_data["data"][field] = int(text)
-    idx +=1
+    # simpan data
+    context.user_data.setdefault("data", {})[field] = int(text)
+    idx += 1
 
-    if idx >= len(fields):
-        await update.message.reply_text("✅ Semua data berhasil diinput!")
-        return ConversationHandler.END
+    # cek apakah masih ada field berikutnya
+    if idx < len(fields):
+        context.user_data["field_idx"] = idx
+        await update.message.reply_text(FIELD_PROMPTS[fields[idx]])
+        return ASKING
 
-    context.user_data["field_idx"] = idx
-    await update.message.reply_text(FIELD_PROMPTS[fields[idx]])
-    return ASKING
+    # semua data diinput, cek constraints
+    wrong_groups = check_constraints_groups(context.user_data["data"])
+    if wrong_groups:
+        # ambil field pertama dari grup salah
+        first_wrong_field = wrong_groups[0][1][0]
+        idx = fields.index(first_wrong_field)
+        context.user_data["field_idx"] = idx
+        await update.message.reply_text(
+            f"❌ Jumlah data tidak sesuai di grup {wrong_groups[0][0]}. Silakan input ulang:"
+            f"\n{FIELD_PROMPTS[first_wrong_field]}"
+        )
+        return ASKING
+
+    await update.message.reply_text("✅ Semua data berhasil diinput!")
+    return ConversationHandler.END
 
 # ==============================
 # MAIN
