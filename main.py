@@ -1,407 +1,520 @@
 import os
 import csv
-from datetime import datetime
-from typing import Dict, List, Tuple
+from itertools import combinations
+from typing import List, Tuple, Dict
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ContextTypes, filters, ConversationHandler
+    Application, CommandHandler, MessageHandler, ConversationHandler,
+    filters, ContextTypes
 )
 
 # =========================
 # KONFIG
 # =========================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8417540455:AAE4ihl_idjQD-WVifK1U5sIevLoozDCHlM"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8417540455:AAHowzwxGRwT1BTA5sC6vO1xkBhvMeBry7U"
+MIN_SUPPORT = 0.30
 
-CSV_FILE = "rekap_data.csv"
-
-# =========================
-# MENU STATES
-# =========================
-MENU, INPUT_FLOW = range(2)
-
-# =========================
-# DEFINISI PROMPT (URUTAN WAJIB)
-# =========================
-# Key -> Teks prompt (emoji + label persis seperti yang kamu minta)
-PROMPTS = [
-    ("TOTAL", "📊 Total keseluruhan data yang dianalisis: "),
-    ("JK1", "👩 Jumlah Perempuan (JK1): "),
-    ("JK2", "👨 Jumlah Laki-Laki (JK2): "),
-    ("UMR1", "🎂 Jumlah usia < 20 Tahun (UMR1): "),
-    ("UMR2", "🧑‍💼 Jumlah usia 20-30 Tahun (UMR2): "),
-    ("UMR3", "👨‍👩‍👧‍👦 Jumlah usia 31-40 Tahun (UMR3): "),
-    ("UMR4", "👴 Jumlah usia 41-50 Tahun (UMR4): "),
-    ("UMR5", "👵 Jumlah usia > 50 Tahun (UMR5): "),
-    ("PT1", "📚 Tamatan SD/Sederajat (PT1): "),
-    ("PT2", "🏫 Tamatan SMP/Sederajat (PT2): "),
-    ("PT3", "🎓 Tamatan SMA/Sederajat (PT3): "),
-    ("PT4", "🎓🎓 Tamatan Diploma/Sarjana (PT4): "),
-    ("FBJ1", "📅🔥 Frekuensi Bermain Hampir Setiap Hari (FBJ1): "),
-    ("FBJ2", "📅 Frekuensi Bermain 2-3 kali/minggu (FBJ2): "),
-    ("FBJ3", "📆 Frekuensi Bermain 1 kali/minggu (FBJ3): "),
-    ("FBJ4", "⏳ Frekuensi Bermain <1 kali/minggu (FBJ4): "),
-    ("JJ1", "🎲 Jenis Judi Togel/Lotere Online (JJ1): "),
-    ("JJ2", "⚽ Jenis Judi Taruhan Olahraga (JJ2): "),
-    ("JJ3", "🃏 Jenis Judi Kasino Online (JJ3): "),
-    ("JJ4", "❓ Jenis Judi Lainnya (JJ4): "),
-    ("PDB1", "💸 Pengeluaran < Rp 500Rb (PDB1): "),
-    ("PDB2", "💰 Pengeluaran Rp 500Rb - Rp 2 Jt (PDB2): "),
-    ("PDB3", "💵 Pengeluaran 2 Jt - 5 Jt (PDB3): "),
-    ("PDB4", "🏦 Pengeluaran > Rp 5 Jt (PDB4): "),
-    ("MK1", "❗ Masalah Keuangan YA (MK1): "),
-    ("MK2", "✔️ Masalah Keuangan TIDAK (MK2): "),
-    ("FB1", "🙅‍♂️ Frekuensi Bertengkar Tidak Pernah (FB1): "),
-    ("FB2", "🤏 Frekuensi Bertengkar Jarang 1-2 Kali/bln (FB2): "),
-    ("FB3", "🔥 Frekuensi Bertengkar Sering 1-2 Kali/bln (FB3): "),
-    ("FB4", "💥 Frekuensi Bertengkar Hampir Setiap Hari (FB4): "),
-    ("KJO1", "🎰❗ Kecanduan Judi Online YA (KJO1): "),
-    ("KJO2", "✔️ Kecanduan Judi Online TIDAK (KJO2): "),
-    ("PJO1", "💔 Perceraian YA (PJO1): "),
-    ("PJO2", "💖 Perceraian TIDAK (PJO2): "),
-    ("ABJ1", "🎰 Kecanduan Bermain Judi Online (ABJ1): "),
-    ("ABJ2", "❗ Masalah Keuangan dalam Pernikahan (ABJ2): "),
-    ("ABJ3", "🗣️ Pertengkaran/Komunikasi yang Buruk (ABJ3): "),
-    ("ABJ4", "⚠️ Kekerasan dalam Rumah Tangga (ABJ4): "),
-    ("ABJ5", "🤥 Ketidakjujuran Pasangan akibat Judi (ABJ5): "),
-]
-FLOW_KEYS = [k for k, _ in PROMPTS]
-PROMPT_MAP = dict(PROMPTS)
-
-# =========================
-# DEFINISI KELOMPOK & VALIDASI
-# =========================
-# group_code, keys, validate: "sum_total" atau "sum_pjo1" atau None
-GROUPS: List[Tuple[str, List[str], str]] = [
-    ("TOTAL", ["TOTAL"], None),
-    ("JK", ["JK1", "JK2"], "sum_total"),
-    ("UMR", ["UMR1", "UMR2", "UMR3", "UMR4", "UMR5"], "sum_total"),
-    ("PT", ["PT1", "PT2", "PT3", "PT4"], "sum_total"),
-    ("FBJ", ["FBJ1", "FBJ2", "FBJ3", "FBJ4"], "sum_total"),
-    ("JJ", ["JJ1", "JJ2", "JJ3", "JJ4"], "sum_total"),
-    ("PDB", ["PDB1", "PDB2", "PDB3", "PDB4"], "sum_total"),
-    ("MK", ["MK1", "MK2"], "sum_total"),
-    ("FB", ["FB1", "FB2", "FB3", "FB4"], "sum_total"),
-    ("KJO", ["KJO1", "KJO2"], "sum_total"),
-    ("PJO", ["PJO1", "PJO2"], "sum_total"),
-    ("ABJ", ["ABJ1", "ABJ2", "ABJ3", "ABJ4", "ABJ5"], "sum_pjo1"),
+# Urutan input & grup validasi
+GROUPS = [
+    ("TOTAL",),  # 0
+    ("JK1", "JK2"),
+    ("UMR1", "UMR2", "UMR3", "UMR4", "UMR5"),
+    ("PT1", "PT2", "PT3", "PT4"),
+    ("FBJ1", "FBJ2", "FBJ3", "FBJ4"),
+    ("JJ1", "JJ2", "JJ3", "JJ4"),
+    ("PDB1", "PDB2", "PDB3", "PDB4"),
+    ("MK1", "MK2"),
+    ("FB1", "FB2", "FB3", "FB4"),
+    ("KJO1", "KJO2"),
+    ("PJO1", "PJO2"),
+    ("ABJ1", "ABJ2", "ABJ3", "ABJ4", "ABJ5"),
 ]
 
-# Peta: key -> (group_code, start_index, end_index)
-KEY_GROUP_INFO: Dict[str, Tuple[str, int, int]] = {}
-cursor = 0
-for code, keys, _ in GROUPS:
-    start = cursor
-    for k in keys:
-        KEY_GROUP_INFO[k] = (code, start, start + len(keys) - 1)
-        cursor += 1  # penting: bergerak mengikuti FLOW tanpa TOTAL diulang
+# Label tampil
+ITEM_LABELS = {
+    "JK1": "ðŸ‘© JK1", "JK2": "ðŸ‘¨ JK2",
+    "UMR1": "ðŸŽ‚ UMR1", "UMR2": "ðŸ§‘â€ðŸ’¼ UMR2", "UMR3": "ðŸ‘¨â€ðŸ‘©â€ðŸ‘§â€ðŸ‘¦ UMR3",
+    "UMR4": "ðŸ‘´ UMR4", "UMR5": "ðŸ‘µ UMR5",
+    "PT1": "ðŸ“š PT1", "PT2": "ðŸ« PT2", "PT3": "ðŸŽ“ PT3", "PT4": "ðŸŽ“ðŸŽ“ PT4",
+    "FBJ1": "ðŸ“…ðŸ”¥ FBJ1", "FBJ2": "ðŸ“… FBJ2", "FBJ3": "ðŸ“† FBJ3", "FBJ4": "â³ FBJ4",
+    "JJ1": "ðŸŽ² JJ1", "JJ2": "âš½ JJ2", "JJ3": "ðŸƒ JJ3", "JJ4": "â“ JJ4",
+    "PDB1": "ðŸ’¸ PDB1", "PDB2": "ðŸ’° PDB2", "PDB3": "ðŸ’µ PDB3", "PDB4": "ðŸ¦ PDB4",
+    "MK1": "â— MK1", "MK2": "âœ”ï¸ MK2",
+    "FB1": "ðŸ™…â€â™‚ï¸ FB1", "FB2": "ðŸ¤ FB2", "FB3": "ðŸ”¥ FB3", "FB4": "ðŸ’¥ FB4",
+    "KJO1": "ðŸŽ°â— KJO1", "KJO2": "âœ”ï¸ KJO2",
+    "PJO1": "ðŸ’” PJO1", "PJO2": "ðŸ’– PJO2",
+    "ABJ1": "ðŸŽ° ABJ1", "ABJ2": "â— ABJ2", "ABJ3": "ðŸ—£ï¸ ABJ3", "ABJ4": "âš ï¸ ABJ4", "ABJ5": "ðŸ¤¥ ABJ5",
+}
+
+# Prompt per field
+FIELD_PROMPTS = {
+    "TOTAL": "Masukkan TOTAL keseluruhan data yang dianalisis (angka):",
+    "JK1": "Masukkan Jumlah Perempuan (JK1):",
+    "JK2": "Masukkan Jumlah Laki-Laki (JK2):",
+    "UMR1": "Masukkan Jumlah usia < 20 Tahun (UMR1):",
+    "UMR2": "Masukkan Jumlah usia 20-30 Tahun (UMR2):",
+    "UMR3": "Masukkan Jumlah usia 31-40 Tahun (UMR3):",
+    "UMR4": "Masukkan Jumlah usia 41-50 Tahun (UMR4):",
+    "UMR5": "Masukkan Jumlah usia > 50 Tahun (UMR5):",
+    "PT1": "Masukkan Tamatan SD/Sederajat (PT1):",
+    "PT2": "Masukkan Tamatan SMP/Sederajat (PT2):",
+    "PT3": "Masukkan Tamatan SMA/Sederajat (PT3):",
+    "PT4": "Masukkan Tamatan Diploma/Sarjana (PT4):",
+    "FBJ1": "Masukkan Frek. Bermain Hampir Setiap Hari (FBJ1):",
+    "FBJ2": "Masukkan Frek. Bermain 2-3 kali/minggu (FBJ2):",
+    "FBJ3": "Masukkan Frek. Bermain 1 kali/minggu (FBJ3):",
+    "FBJ4": "Masukkan Frek. Bermain <1 kali/minggu (FBJ4):",
+    "JJ1": "Masukkan Jenis Judi Togel/Lotere Online (JJ1):",
+    "JJ2": "Masukkan Jenis Judi Taruhan Olahraga (JJ2):",
+    "JJ3": "Masukkan Jenis Judi Kasino Online (JJ3):",
+    "JJ4": "Masukkan Jenis Judi Lainnya (JJ4):",
+    "PDB1": "Masukkan Pengeluaran < Rp 500Rb (PDB1):",
+    "PDB2": "Masukkan Pengeluaran Rp 500Rb - Rp 2 Jt (PDB2):",
+    "PDB3": "Masukkan Pengeluaran 2 Jt - 5 Jt (PDB3):",
+    "PDB4": "Masukkan Pengeluaran > Rp 5 Jt (PDB4):",
+    "MK1": "Masukkan Masalah Keuangan YA (MK1):",
+    "MK2": "Masukkan Masalah Keuangan TIDAK (MK2):",
+    "FB1": "Masukkan Frek. Bertengkar Tidak Pernah (FB1):",
+    "FB2": "Masukkan Frek. Bertengkar Jarang 1-2 Kali/bln (FB2):",
+    "FB3": "Masukkan Frek. Bertengkar Sering 1-2 Kali/bln (FB3):",
+    "FB4": "Masukkan Frek. Bertengkar Hampir Setiap Hari (FB4):",
+    "KJO1": "Masukkan Kecanduan Judi Online YA (KJO1):",
+    "KJO2": "Masukkan Kecanduan Judi Online TIDAK (KJO2):",
+    "PJO1": "Masukkan Perceraian YA (PJO1):",
+    "PJO2": "Masukkan Perceraian TIDAK (PJO2):",
+    "ABJ1": "Masukkan Kecanduan Bermain Judi Online (ABJ1):",
+    "ABJ2": "Masukkan Masalah Keuangan dalam Pernikahan (ABJ2):",
+    "ABJ3": "Masukkan Pertengkaran/Komunikasi yang Buruk (ABJ3):",
+    "ABJ4": "Masukkan Kekerasan dalam Rumah Tangga (ABJ4):",
+    "ABJ5": "Masukkan Ketidakjujuran Pasangan akibat Judi (ABJ5):",
+}
 
 # =========================
-# HELPERS CSV
+# STATE Conversational
 # =========================
-def ensure_csv():
-    if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            header = ["timestamp", "user_id"] + FLOW_KEYS
-            writer.writerow(header)
+ASKING = 1
 
-def append_csv(user_id: int, data: Dict[str, int]):
-    ensure_csv()
-    with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
+# =========================
+# UTIL: file export
+# =========================
+def export_rows_to_csv(filename: str, header: List[str], rows: List[List[str]]):
+    with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        row = [datetime.utcnow().isoformat(), user_id] + [int(data.get(k, 0)) for k in FLOW_KEYS]
-        writer.writerow(row)
+        writer.writerow(header)
+        for r in rows:
+            writer.writerow(r)
+
+def export_text(filename: str, content: str):
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(content)
 
 # =========================
-# UI HELPERS
+# VALIDASI
 # =========================
-def main_menu_kb():
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("📝 INPUT", callback_data="input")],
-            [InlineKeyboardButton("📊 REKAP", callback_data="rekap")],
-            [InlineKeyboardButton("🔄 RESTART", callback_data="restart")],
-        ]
-    )
+def is_int_nonneg(text: str) -> bool:
+    try:
+        v = int(text)
+        return v >= 0
+    except:
+        return False
 
-def after_valid_kb():
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("📊 Lihat Rekap", callback_data="rekap")],
-            [InlineKeyboardButton("🏠 Kembali ke Menu", callback_data="menu")],
-            [InlineKeyboardButton("🔄 Restart", callback_data="restart")],
-        ]
-    )
-
-# =========================
-# START / MENU
-# =========================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # reset state visual (tidak hapus data yang sudah tersimpan)
-    await update.message.reply_text("👋 Selamat datang! Silakan pilih menu:", reply_markup=main_menu_kb())
-    return MENU
-
-async def menu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-
-    if q.data == "menu":
-        await q.edit_message_text("🏠 Menu Utama", reply_markup=main_menu_kb())
-        return MENU
-
-    if q.data == "restart":
-        # Hapus progres input saat ini
-        context.user_data.clear()
-        await q.edit_message_text("🔄 Progres input kamu sudah direset.\nPilih menu:", reply_markup=main_menu_kb())
-        return MENU
-
-    if q.data == "rekap":
-        # Rekap dari data terakhir yang valid di sesi (bukan otomatis saat input)
-        if not context.user_data.get("last_valid"):
-            await q.edit_message_text("⚠️ Belum ada rekap tersimpan di sesi ini.\nSilakan INPUT terlebih dahulu.", reply_markup=main_menu_kb())
-            return MENU
-
-        text = format_rekap(context.user_data["last_valid"])
-        await q.edit_message_text(text, reply_markup=main_menu_kb(), disable_web_page_preview=True)
-        return MENU
-
-    if q.data == "input":
-        # Mulai alur input step-by-step
-        context.user_data["answers"] = {}
-        context.user_data["pos"] = 0
-        await q.edit_message_text("📝 Mode INPUT dimulai.\nMasukkan angka saja (≥ 0).")
-        # Kirim prompt pertama
-        await q.message.reply_text(PROMPT_MAP[FLOW_KEYS[0]])
-        return INPUT_FLOW
-
-    # fallback ke menu
-    await q.edit_message_text("Pilih menu:", reply_markup=main_menu_kb())
-    return MENU
-
-# =========================
-# INPUT FLOW HANDLER
-# =========================
-async def handle_input_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (update.message.text or "").strip()
-    if not text.isdigit():
-        await update.message.reply_text("⚠️ Masukkan *angka bulat* (≥ 0). Coba lagi:", parse_mode="Markdown")
-        # ulang prompt yang sama
-        key = FLOW_KEYS[context.user_data.get("pos", 0)]
-        await update.message.reply_text(PROMPT_MAP[key])
-        return INPUT_FLOW
-
-    value = int(text)
-    pos = context.user_data.get("pos", 0)
-    key = FLOW_KEYS[pos]
-
-    # simpan
-    answers = context.user_data["answers"]
-    answers[key] = value
-
-    # jika TOTAL, validasi sederhana (>=0 saja)
-    if key == "TOTAL" and value < 0:
-        await update.message.reply_text("⚠️ TOTAL tidak boleh negatif. Ulangi.")
-        await update.message.reply_text(PROMPT_MAP["TOTAL"])
-        return INPUT_FLOW
-
-    # cek apakah kita di ujung kelompok → validasi kelompok
-    group_code, start_idx, end_idx = KEY_GROUP_INFO.get(key, ("", 0, 0))
-    if pos == end_idx:
-        # Kumpulkan nilai kelompok
-        keys_in_group = [FLOW_KEYS[i] for i in range(start_idx, end_idx + 1)]
-        if group_code == "TOTAL":
-            # tidak ada validasi jumlah untuk TOTAL
-            pass
-        else:
-            valid, msg = validate_group(group_code, keys_in_group, answers)
-            if not valid:
-                # Hapus jawaban kelompok & mundur ke awal kelompok
-                for k in keys_in_group:
-                    answers.pop(k, None)
-                context.user_data["pos"] = start_idx
-                await update.message.reply_text(msg)
-                # prompt ulang dari kunci pertama kelompok
-                first_key = FLOW_KEYS[start_idx]
-                await update.message.reply_text(PROMPT_MAP[first_key])
-                return INPUT_FLOW
-
-    # lanjut ke variabel berikutnya atau selesai
-    pos += 1
-    context.user_data["pos"] = pos
-
-    if pos >= len(FLOW_KEYS):
-        # Semua terisi & valid → simpan CSV & tawarkan tombol
-        append_csv(update.effective_user.id, answers)
-        # simpan rekap terakhir di sesi
-        context.user_data["last_valid"] = dict(answers)
-
-        await update.message.reply_text(
-            "✅ Semua data valid & sudah disimpan.\nPilih aksi:",
-            reply_markup=after_valid_kb()
-        )
-        return MENU
-
-    # kirim prompt berikutnya
-    next_key = FLOW_KEYS[pos]
-    await update.message.reply_text(PROMPT_MAP[next_key])
-    return INPUT_FLOW
-
-# =========================
-# VALIDASI KELOMPOK
-# =========================
-def validate_group(code: str, keys: List[str], answers: Dict[str, int]) -> Tuple[bool, str]:
-    total = answers.get("TOTAL", 0)
-    s = sum(int(answers.get(k, 0)) for k in keys)
-
-    if code != "ABJ":
-        # semua selain ABJ wajib == TOTAL
-        if s != total:
-            # contoh pesan: "❌ JK tidak valid (jumlah=120, harus TOTAL=100). Ulangi dari JK1."
-            first = keys[0]
-            msg = f"❌ {code} tidak valid (jumlah={s}, harus TOTAL={total}).\n🔁 Silakan ulangi mulai dari {first}."
-            return False, msg
+def validate_group(data: Dict[str, int], group_idx: int) -> Tuple[bool, str]:
+    """Validasi setelah 1 kelompok selesai diisi.
+       - Semua kelompok kecuali ABJ: sum == TOTAL
+       - ABJ: sum == PJO1
+    """
+    group = GROUPS[group_idx]
+    if group == ("TOTAL",):
         return True, ""
 
-    # ABJ: jumlah ABJ1..ABJ5 = PJO1
-    pjo1 = int(answers.get("PJO1", 0))
-    if s != pjo1:
-        msg = f"❌ ABJ tidak valid (jumlah={s}, harus sama dengan PJO1={pjo1}).\n🔁 Silakan ulangi mulai dari {keys[0]}."
-        return False, msg
+    # total sudah harus ada
+    total = data.get("TOTAL", None)
+    if total is None:
+        return False, "TOTAL belum diisi."
 
+    vals = [data.get(k, None) for k in group]
+    if any(v is None for v in vals):
+        return False, "Ada nilai yang belum diisi di grup ini."
+
+    s = sum(vals)
+
+    # ABJ group
+    if group == GROUPS[-1]:
+        pjo1 = data.get("PJO1", None)
+        if pjo1 is None:
+            return False, "PJO1 belum diisi. Lengkapi grup PJO dulu."
+        if s != pjo1:
+            return False, f"âŒ ABJ1..ABJ5 harus = PJO1 ({pjo1}), sekarang = {s}."
+        return True, ""
+
+    # PJO group juga harus = TOTAL
+    if group == GROUPS[10]:
+        if s != total:
+            return False, f"âŒ PJO1 + PJO2 harus = TOTAL ({total}), sekarang = {s}."
+        return True, ""
+
+    # kelompok lain harus = TOTAL
+    if s != total:
+        return False, f"âŒ Jumlah {', '.join(group)} harus = TOTAL ({total}), sekarang = {s}."
     return True, ""
 
+def clear_group(user_data: dict, group_idx: int):
+    for k in GROUPS[group_idx]:
+        user_data.pop(k, None)
+
+def group_start_index(group_idx: int) -> int:
+    """Dapatkan index field awal grup dalam urutan input linear."""
+    idx = 0
+    for i in range(group_idx):
+        idx += len(GROUPS[i])
+    return idx
+
 # =========================
-# FORMAT REKAP / OUTPUT
+# REKAP FORMAT (tampilan karakter)
 # =========================
-def format_rekap(ans: Dict[str, int]) -> str:
-    # fungsi bantu sum kelompok
-    def sumi(keys): return sum(int(ans.get(k, 0)) for k in keys)
-    T = int(ans.get("TOTAL", 0))
+def format_rekap_text(d: Dict[str, int]) -> str:
+    # ensure all keys present (0 default)
+    val = lambda k: d.get(k, 0)
+    return f"""ðŸ“‹ Berikut rekap data yang telah kamu input:
 
-    JK = ["JK1", "JK2"]
-    UMR = ["UMR1", "UMR2", "UMR3", "UMR4", "UMR5"]
-    PT = ["PT1", "PT2", "PT3", "PT4"]
-    FBJ = ["FBJ1", "FBJ2", "FBJ3", "FBJ4"]
-    JJ = ["JJ1", "JJ2", "JJ3", "JJ4"]
-    PDB = ["PDB1", "PDB2", "PDB3", "PDB4"]
-    MK = ["MK1", "MK2"]
-    FB = ["FB1", "FB2", "FB3", "FB4"]
-    KJO = ["KJO1", "KJO2"]
-    PJO = ["PJO1", "PJO2"]
-    ABJ = ["ABJ1", "ABJ2", "ABJ3", "ABJ4", "ABJ5"]
+ðŸ“Š Total keseluruhan data yang dianalisis: {val('TOTAL')}
 
-    sum_JK, sum_UMR, sum_PT = sumi(JK), sumi(UMR), sumi(PT)
-    sum_FBJ, sum_JJ, sum_PDB = sumi(FBJ), sumi(JJ), sumi(PDB)
-    sum_MK, sum_FB, sum_KJO = sumi(MK), sumi(FB), sumi(KJO)
-    sum_PJO, sum_ABJ = sumi(PJO), sumi(ABJ)
+ðŸ‘© Jumlah Perempuan (JK1): {val('JK1')}  
+ðŸ‘¨ Jumlah Laki-Laki (JK2): {val('JK2')}
 
-    ok = lambda cond: "✅" if cond else "❌"
+ðŸŽ‚ Jumlah usia < 20 Tahun (UMR1): {val('UMR1')}  
+ðŸ§‘â€ðŸ’¼ Jumlah usia 20-30 Tahun (UMR2): {val('UMR2')}  
+ðŸ‘¨â€ðŸ‘©â€ðŸ‘§â€ðŸ‘¦ Jumlah usia 31-40 Tahun (UMR3): {val('UMR3')}  
+ðŸ‘´ Jumlah usia 41-50 Tahun (UMR4): {val('UMR4')}  
+ðŸ‘µ Jumlah usia > 50 Tahun (UMR5): {val('UMR5')}
 
-    lines = []
-    lines.append("📊 FINAL DATA REKAP 📊\n")
-    lines.append(f"🔢 Total Data : {T}\n")
+ðŸ“š Tamatan SD/Sederajat (PT1): {val('PT1')}  
+ðŸ« Tamatan SMP/Sederajat (PT2): {val('PT2')}  
+ðŸŽ“ Tamatan SMA/Sederajat (PT3): {val('PT3')}  
+ðŸŽ“ðŸŽ“ Tamatan Diploma/Sarjana (PT4): {val('PT4')}
 
-    # JK
-    lines.append(f"👩 JK1 : {ans.get('JK1',0)}")
-    lines.append(f"👨 JK2 : {ans.get('JK2',0)}")
-    lines.append(f"📌 Total JK = {sum_JK} {ok(sum_JK==T)}\n")
+ðŸ“…ðŸ”¥ Frekuensi Bermain Hampir Setiap Hari (FBJ1): {val('FBJ1')}  
+ðŸ“… Frekuensi Bermain 2-3 kali/minggu (FBJ2): {val('FBJ2')}  
+ðŸ“† Frekuensi Bermain 1 kali/minggu (FBJ3): {val('FBJ3')}  
+â³ Frekuensi Bermain <1 kali/minggu (FBJ4): {val('FBJ4')}
 
-    # UMR
-    lines.append(f"🎂 UMR1 : {ans.get('UMR1',0)}")
-    lines.append(f"🧑‍💼 UMR2 : {ans.get('UMR2',0)}")
-    lines.append(f"👨‍👩‍👧‍👦 UMR3 : {ans.get('UMR3',0)}")
-    lines.append(f"👴 UMR4 : {ans.get('UMR4',0)}")
-    lines.append(f"🧓 UMR5 : {ans.get('UMR5',0)}")
-    lines.append(f"📌 Total UMR = {sum_UMR} {ok(sum_UMR==T)}\n")
+ðŸŽ² Jenis Judi Togel/Lotere Online (JJ1): {val('JJ1')}  
+âš½ Jenis Judi Taruhan Olahraga (JJ2): {val('JJ2')}  
+ðŸƒ Jenis Judi Kasino Online (JJ3): {val('JJ3')}  
+â“ Jenis Judi Lainnya (JJ4): {val('JJ4')}
 
-    # PT
-    lines.append(f"📚 PT1 : {ans.get('PT1',0)}")
-    lines.append(f"🏫 PT2 : {ans.get('PT2',0)}")
-    lines.append(f"🎓 PT3 : {ans.get('PT3',0)}")
-    lines.append(f"🎓🎓 PT4 : {ans.get('PT4',0)}")
-    lines.append(f"📌 Total PT = {sum_PT} {ok(sum_PT==T)}\n")
+ðŸ’¸ Pengeluaran < Rp 500Rb (PDB1): {val('PDB1')}  
+ðŸ’° Pengeluaran Rp 500Rb - Rp 2 Jt (PDB2): {val('PDB2')}  
+ðŸ’µ Pengeluaran 2 Jt - 5 Jt (PDB3): {val('PDB3')}  
+ðŸ¦ Pengeluaran > Rp 5 Jt (PDB4): {val('PDB4')}
 
-    # FBJ
-    lines.append(f"📅🔥 FBJ1 : {ans.get('FBJ1',0)}")
-    lines.append(f"📅 FBJ2 : {ans.get('FBJ2',0)}")
-    lines.append(f"📆 FBJ3 : {ans.get('FBJ3',0)}")
-    lines.append(f"⏳ FBJ4 : {ans.get('FBJ4',0)}")
-    lines.append(f"📌 Total FBJ = {sum_FBJ} {ok(sum_FBJ==T)}\n")
+â— Masalah Keuangan YA (MK1): {val('MK1')}  
+âœ”ï¸ Masalah Keuangan TIDAK (MK2): {val('MK2')}
 
-    # JJ
-    lines.append(f"🎲 JJ1 : {ans.get('JJ1',0)}")
-    lines.append(f"⚽ JJ2 : {ans.get('JJ2',0)}")
-    lines.append(f"🃏 JJ3 : {ans.get('JJ3',0)}")
-    lines.append(f"❓ JJ4 : {ans.get('JJ4',0)}")
-    lines.append(f"📌 Total JJ = {sum_JJ} {ok(sum_JJ==T)}\n")
+ðŸ™…â€â™‚ï¸ Frekuensi Bertengkar Tidak Pernah (FB1): {val('FB1')}  
+ðŸ¤ Frekuensi Bertengkar Jarang 1-2 Kali/bln (FB2): {val('FB2')}  
+ðŸ”¥ Frekuensi Bertengkar Sering 1-2 Kali/bln (FB3): {val('FB3')}  
+ðŸ’¥ Frekuensi Bertengkar Hampir Setiap Hari (FB4): {val('FB4')}
 
-    # PDB
-    lines.append(f"💸 PDB1 : {ans.get('PDB1',0)}")
-    lines.append(f"💰 PDB2 : {ans.get('PDB2',0)}")
-    lines.append(f"💵 PDB3 : {ans.get('PDB3',0)}")
-    lines.append(f"🏦 PDB4 : {ans.get('PDB4',0)}")
-    lines.append(f"📌 Total PDB = {sum_PDB} {ok(sum_PDB==T)}\n")
+ðŸŽ°â— Kecanduan Judi Online YA (KJO1): {val('KJO1')}  
+âœ”ï¸ Kecanduan Judi Online TIDAK (KJO2): {val('KJO2')}
 
-    # MK
-    lines.append(f"❗ MK1 : {ans.get('MK1',0)}")
-    lines.append(f"✔️ MK2 : {ans.get('MK2',0)}")
-    lines.append(f"📌 Total MK = {sum_MK} {ok(sum_MK==T)}\n")
+ðŸ’” Perceraian YA (PJO1): {val('PJO1')}  
+ðŸ’– Perceraian TIDAK (PJO2): {val('PJO2')}
 
-    # FB (bertengkar)
-    lines.append(f"🙅‍♂️ FB1 : {ans.get('FB1',0)}")
-    lines.append(f"🤏 FB2 : {ans.get('FB2',0)}")
-    lines.append(f"🔥 FB3 : {ans.get('FB3',0)}")
-    lines.append(f"💥 FB4 : {ans.get('FB4',0)}")
-    lines.append(f"📌 Total FB = {sum_FB} {ok(sum_FB==T)}\n")
+ðŸŽ° Kecanduan Bermain Judi Online (ABJ1): {val('ABJ1')}  
+â— Masalah Keuangan dalam Pernikahan (ABJ2): {val('ABJ2')}  
+ðŸ—£ï¸ Pertengkaran/Komunikasi yang Buruk (ABJ3): {val('ABJ3')}  
+âš ï¸ Kekerasan dalam Rumah Tangga (ABJ4): {val('ABJ4')}  
+ðŸ¤¥ Ketidakjujuran Pasangan akibat Judi (ABJ5): {val('ABJ5')}
+"""
 
-    # KJO
-    lines.append(f"🎰❗ KJO1 : {ans.get('KJO1',0)}")
-    lines.append(f"✔️ KJO2 : {ans.get('KJO2',0)}")
-    lines.append(f"📌 Total KJO = {sum_KJO} {ok(sum_KJO==T)}\n")
+def rekap_rows_csv(d: Dict[str, int]) -> List[List[str]]:
+    # Sederhana: dua kolom
+    order = [
+        "TOTAL",
+        "JK1","JK2",
+        "UMR1","UMR2","UMR3","UMR4","UMR5",
+        "PT1","PT2","PT3","PT4",
+        "FBJ1","FBJ2","FBJ3","FBJ4",
+        "JJ1","JJ2","JJ3","JJ4",
+        "PDB1","PDB2","PDB3","PDB4",
+        "MK1","MK2",
+        "FB1","FB2","FB3","FB4",
+        "KJO1","KJO2",
+        "PJO1","PJO2",
+        "ABJ1","ABJ2","ABJ3","ABJ4","ABJ5",
+    ]
+    rows = []
+    for k in order:
+        label = ITEM_LABELS.get(k, k) if k != "TOTAL" else "ðŸ“Š TOTAL"
+        rows.append([label, str(d.get(k, 0))])
+    return rows
 
-    # PJO
-    lines.append(f"💔 PJO1 : {ans.get('PJO1',0)}")
-    lines.append(f"💖 PJO2 : {ans.get('PJO2',0)}")
-    lines.append(f"📌 Total PJO = {sum_PJO} {ok(sum_PJO==T)}\n")
+# =========================
+# APRIORI
+# =========================
+def one_itemset(data: Dict[str, int]) -> List[Tuple[Tuple[str, ...], int, float, bool]]:
+    total = data["TOTAL"]
+    items = [(k, v) for k, v in data.items() if k != "TOTAL"]
+    out = []
+    for k, v in items:
+        support = (v / total) if total > 0 else 0.0
+        out.append(((k,), v, support, support >= MIN_SUPPORT))
+    return out
 
-    # ABJ
-    lines.append(f"🎰 ABJ1 : {ans.get('ABJ1',0)}")
-    lines.append(f"❗ ABJ2 : {ans.get('ABJ2',0)}")
-    lines.append(f"🗣️ ABJ3 : {ans.get('ABJ3',0)}")
-    lines.append(f"⚠️ ABJ4 : {ans.get('ABJ4',0)}")
-    lines.append(f"🤥 ABJ5 : {ans.get('ABJ5',0)}")
-    lines.append(f"📌 Total ABJ = PJO1 = {sum_ABJ} {ok(sum_ABJ==int(ans.get('PJO1',0)))}")
+def k_itemset_from_candidates(
+    data: Dict[str, int],
+    candidates: List[Tuple[str, ...]]
+) -> List[Tuple[Tuple[str, ...], int, float, bool]]:
+    total = data["TOTAL"]
+    out = []
+    for combo in candidates:
+        freq = min(data[c] for c in combo)  # proxy co-occurrence
+        support = (freq / total) if total > 0 else 0.0
+        out.append((combo, freq, support, support >= MIN_SUPPORT))
+    return out
 
-    return "\n".join(lines)
+def apriori_generate_candidates(prev_frequents: List[Tuple[str, ...]], k: int) -> List[Tuple[str, ...]]:
+    """Gabungkan frequent (k-1)-itemset untuk jadi kandidat k-itemset (Apriori join step)"""
+    prev_sorted = [tuple(sorted(x)) for x in prev_frequents]
+    prev_sorted = sorted(set(prev_sorted))
+    candidates = set()
+    for i in range(len(prev_sorted)):
+        for j in range(i+1, len(prev_sorted)):
+            a, b = prev_sorted[i], prev_sorted[j]
+            if a[:k-2] == b[:k-2]:  # prefix sama
+                new = tuple(sorted(set(a).union(b)))
+                if len(new) == k:
+                    # pruning sederhana: semua subset (k-1) harus frequent
+                    all_subfreq = True
+                    for sub in combinations(new, k-1):
+                        if tuple(sorted(sub)) not in prev_sorted:
+                            all_subfreq = False
+                            break
+                    if all_subfreq:
+                        candidates.add(new)
+    return sorted(candidates)
+
+def apriori_to_rows(
+    data: Dict[str, int],
+    k: int
+) -> Tuple[List[List[str]], List[Tuple[str, ...]]]:
+    """Hitung k-itemset dengan Apriori (pakai proxy min() untuk freq gabungan).
+       Return rows untuk CSV/TXT dan daftar frequent untuk next level.
+    """
+    if k == 1:
+        result = one_itemset(data)
+    else:
+        # generate candidates dari frequent (k-1)
+        # untuk k=2, frequent_1 adalah item dengan support>=MIN_SUPPORT
+        prev_rows, prev_freq = apriori_to_rows(data, k-1)
+        candidates = apriori_generate_candidates(prev_freq, k)
+        result = k_itemset_from_candidates(data, candidates)
+
+    rows = []
+    frequents = []
+    total = data["TOTAL"]
+
+    for combo, freq, support, is_freq in result:
+        labels = " + ".join(ITEM_LABELS[c] for c in combo)
+        rows.append([labels, f"{freq}/{total} = {support:.2f}", "YES" if is_freq else "NO"])
+        if is_freq:
+            frequents.append(combo)
+
+    return rows, frequents
+
+# =========================
+# HANDLERS
+# =========================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "ðŸ‘‹ Halo! Bot siap.\n\n"
+        "Perintah:\n"
+        "/input  â†’ mulai input data responden (step-by-step + validasi)\n"
+        "/rekap  â†’ tampilkan rekap & kirim rekap.csv + rekap.txt\n"
+        "/apriori1 â†’ hasil 1-itemset (file CSV & TXT)\n"
+        "/apriori2 â†’ hasil 2-itemset (dari frequent 1-item)\n"
+        "/apriori3 â†’ hasil 3-itemset (dari frequent 2-item)\n"
+        "/reset  â†’ hapus data & mulai ulang"
+    )
+
+async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text("ðŸ”„ Data kamu sudah direset. Ketik /input untuk mulai isi lagi.")
+
+def _all_fields_linear():
+    fields = []
+    for g in GROUPS:
+        fields.extend(g)
+    return fields
+
+async def input_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    context.user_data["idx"] = 0
+    context.user_data["data"] = {}
+    fields = _all_fields_linear()
+    first_field = fields[0]
+    await update.message.reply_text("ðŸ“ Mulai input data responden.\nKetik angka (bilangan bulat â‰¥ 0).")
+    await update.message.reply_text(FIELD_PROMPTS[first_field])
+    return ASKING
+
+async def input_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if not is_int_nonneg(text):
+        await update.message.reply_text("â— Masukkan angka bulat â‰¥ 0. Coba lagi.")
+        return ASKING
+
+    value = int(text)
+    fields = _all_fields_linear()
+    idx = context.user_data.get("idx", 0)
+    key = fields[idx]
+
+    # simpan nilai
+    context.user_data["data"][key] = value
+
+    # cek apakah akhir grup
+    # tentukan grup index & range
+    # cari grup & posisi
+    cumulative = 0
+    for gi, g in enumerate(GROUPS):
+        if idx < cumulative + len(g):
+            group_idx = gi
+            in_group_pos = idx - cumulative
+            group_len = len(g)
+            break
+        cumulative += len(g)
+
+    # jika baru saja mengisi field terakhir di grup -> validasi grup
+    if in_group_pos == group_len - 1:
+        ok, msg = validate_group(context.user_data["data"], group_idx)
+        if not ok:
+            # hapus nilai grup ini & minta ulang dari awal grup
+            clear_group(context.user_data["data"], group_idx)
+            # set idx ke awal grup
+            context.user_data["idx"] = group_start_index(group_idx)
+            await update.message.reply_text(msg)
+            # prompt ulang mulai dari awal grup
+            first_key = GROUPS[group_idx][0]
+            await update.message.reply_text(f"ðŸ” Ulangi pengisian grup: {', '.join(GROUPS[group_idx])}")
+            await update.message.reply_text(FIELD_PROMPTS[first_key])
+            return ASKING
+
+    # lanjut ke field berikutnya
+    idx += 1
+    context.user_data["idx"] = idx
+
+    # selesai semua?
+    if idx >= len(fields):
+        context.user_data["validated"] = True
+        await update.message.reply_text("âœ… Input selesai & valid! Gunakan /rekap untuk melihat ringkasan.")
+        return ConversationHandler.END
+
+    # prompt field berikutnya
+    next_key = fields[idx]
+    await update.message.reply_text(FIELD_PROMPTS[next_key])
+    return ASKING
+
+async def input_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Dibatalkan. Ketik /input untuk mulai lagi.")
+    return ConversationHandler.END
+
+def ensure_validated_data(context: ContextTypes.DEFAULT_TYPE) -> Dict[str, int]:
+    """Kembalikan data yang sudah tervalidasi (semua key ada), default 0 bila belum ada."""
+    d = {k: 0 for g in GROUPS for k in g}
+    if "data" in context.user_data:
+        for k, v in context.user_data["data"].items():
+            d[k] = v
+    return d
+
+async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    d = ensure_validated_data(context)
+
+    # Cek minimal validitas: TOTAL > 0 dan tiap grup ok
+    for gi in range(len(GROUPS)):
+        ok, msg = validate_group(d, gi)
+        if not ok and GROUPS[gi] != ("TOTAL",):
+            await update.message.reply_text("âš ï¸ Data belum valid. Jalankan /input untuk melengkapi.")
+            return
+
+    # Tampilkan karakter
+    text = format_rekap_text(d)
+    await update.message.reply_text(text)
+
+    # Kirim file TXT
+    export_text("rekap.txt", text)
+    await update.message.reply_document(open("rekap.txt", "rb"))
+
+    # Kirim CSV
+    rows = rekap_rows_csv(d)
+    export_rows_to_csv("rekap.csv", ["Item", "Jumlah"], rows)
+    await update.message.reply_document(open("rekap.csv", "rb"))
+
+def build_apriori_output_title(k: int) -> str:
+    return f"ðŸ“Š Hasil Perhitungan {k}-Itemset (Support â‰¥ {int(MIN_SUPPORT*100)}%)"
+
+async def apriori_generic(update: Update, context: ContextTypes.DEFAULT_TYPE, k: int):
+    d = ensure_validated_data(context)
+
+    # pastikan data sudah valid (sama seperti /rekap)
+    for gi in range(len(GROUPS)):
+        ok, msg = validate_group(d, gi)
+        if not ok and GROUPS[gi] != ("TOTAL",):
+            await update.message.reply_text("âš ï¸ Data belum valid. Jalankan /input untuk melengkapi.")
+            return
+
+    title = build_apriori_output_title(k)
+
+    # hitung
+    rows, frequents = apriori_to_rows(d, k)
+
+    # Preview singkat di chat (maks 30 baris) agar tidak kepanjangan
+    preview = "\n".join([f"{r[0]} â†’ {r[1]} ({r[2]})" for r in rows[:30]])
+    if not preview:
+        preview = "Tidak ada kombinasi."
+    await update.message.reply_text(f"{title}\n\n{preview}\n\n(Detail lengkap dikirim sebagai file CSV & TXT.)")
+
+    # file CSV/TXT lengkap
+    fname = f"apriori{k}"
+    export_rows_to_csv(fname + ".csv", ["Itemset", "Support", "Valid"], rows)
+    await update.message.reply_document(open(fname + ".csv", "rb"))
+    export_text(fname + ".txt", "\n".join([f"{r[0]} | {r[1]} | {r[2]}" for r in rows]))
+    await update.message.reply_document(open(fname + ".txt", "rb"))
+
+async def apriori1(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await apriori_generic(update, context, 1)
+
+async def apriori2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await apriori_generic(update, context, 2)
+
+async def apriori3(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await apriori_generic(update, context, 3)
 
 # =========================
 # MAIN
 # =========================
-def build_app() -> Application:
+def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Conversation for /input
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[CommandHandler("input", input_start)],
         states={
-            MENU: [CallbackQueryHandler(menu_cb, pattern="^(input|rekap|restart|menu)$")],
-            INPUT_FLOW: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_input_number)],
+            ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_ask)]
         },
-        fallbacks=[CommandHandler("start", start)],
-        allow_reentry=True,
+        fallbacks=[CommandHandler("cancel", input_cancel)],
+        name="input_conversation",
+        persistent=False,
     )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("reset", reset))
     app.add_handler(conv)
+    app.add_handler(CommandHandler("rekap", rekap))
+    app.add_handler(CommandHandler("apriori1", apriori1))
+    app.add_handler(CommandHandler("apriori2", apriori2))
+    app.add_handler(CommandHandler("apriori3", apriori3))
 
-    # tombol menu tetap bisa dipakai kapan pun
-    app.add_handler(CallbackQueryHandler(menu_cb, pattern="^(input|rekap|restart|menu)$"))
-
-    return app
-
-def main():
-    ensure_csv()
-    app = build_app()
-    print("Bot berjalan...")
     app.run_polling()
 
 if __name__ == "__main__":
