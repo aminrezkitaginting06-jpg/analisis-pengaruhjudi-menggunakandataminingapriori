@@ -10,7 +10,7 @@ from telegram.ext import (
 # =========================
 # KONFIG
 # =========================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8038423070:AAGMen0EKwhi1Up3rkWKGghg-Jf_cxgM1DI"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAG4TChMmiyG5teVNcn4-zMWOwL7mlMmMd0"
 MIN_SUPPORT = 0.3
 
 GROUPS = [
