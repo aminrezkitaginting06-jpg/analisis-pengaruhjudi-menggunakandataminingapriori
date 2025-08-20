@@ -6,7 +6,13 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAG4TChMmiyG5teVNcn4-zMWOwL7mlMmMd0"
+# ==============================
+# KONFIG
+# ==============================
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN belum diset di environment variables!")
+
 ASKING = 1
 
 GROUPS = [
@@ -41,6 +47,9 @@ ITEM_LABELS = {
 
 FIELD_PROMPTS = {k: f"Masukkan nilai untuk {v}:" for k,v in ITEM_LABELS.items()}
 
+# ==============================
+# UTILS
+# ==============================
 def is_int_nonneg(text: str) -> bool:
     try:
         return int(text) >= 0
@@ -80,6 +89,9 @@ def check_constraints_groups(data: dict) -> list:
         wrong_groups.append(("ABJ", abj_items))
     return wrong_groups
 
+# ==============================
+# HANDLERS
+# ==============================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📝 Input Data", callback_data='input')],
@@ -139,6 +151,9 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Semua data berhasil diinput!")
     return ConversationHandler.END
 
+# ==============================
+# MAIN
+# ==============================
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
     conv_handler = ConversationHandler(
