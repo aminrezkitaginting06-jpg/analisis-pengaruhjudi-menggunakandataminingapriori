@@ -14,7 +14,6 @@ from telegram.ext import (
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "8038423070:AAGMen0EKwhi1Up3rkWKGghg-Jf_cxgM1DI"
 MIN_SUPPORT = 0.30
-
 GROUPS = [
     ("TOTAL",),
     ("JK1", "JK2"),
@@ -88,7 +87,7 @@ FIELD_PROMPTS = {
 }
 
 # =========================
-# STATE Conversational
+# STATE
 # =========================
 ASKING = 1
 
@@ -99,8 +98,7 @@ def export_rows_to_csv(filename: str, header: List[str], rows: List[List[str]]):
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for r in rows:
-            writer.writerow(r)
+        writer.writerows(rows)
 
 def export_text(filename: str, content: str):
     with open(filename, "w", encoding="utf-8") as f:
@@ -108,8 +106,7 @@ def export_text(filename: str, content: str):
 
 def is_int_nonneg(text: str) -> bool:
     try:
-        v = int(text)
-        return v >= 0
+        return int(text) >= 0
     except:
         return False
 
@@ -132,11 +129,12 @@ def validate_group(data: Dict[str, int], group_idx: int) -> Tuple[bool, str]:
         if s != pjo1:
             return False, f"❌ ABJ1..ABJ5 harus = PJO1 ({pjo1}), sekarang = {s}."
         return True, ""
-    # PJO group juga harus = TOTAL
+    # PJO group
     if group == GROUPS[10]:
         if s != total:
             return False, f"❌ PJO1 + PJO2 harus = TOTAL ({total}), sekarang = {s}."
         return True, ""
+    # grup lain harus = TOTAL
     if s != total:
         return False, f"❌ Jumlah {', '.join(group)} harus = TOTAL ({total}), sekarang = {s}."
     return True, ""
@@ -193,8 +191,8 @@ def one_itemset(data: Dict[str, int]):
     for k, v in data.items():
         if k == "TOTAL":
             continue
-        support = v/total if total>0 else 0
-        out.append(((k,), v, support, support>=MIN_SUPPORT))
+        support = v / total if total > 0 else 0
+        out.append(((k,), v, support, support >= MIN_SUPPORT))
     return out
 
 def k_itemset_from_candidates(data: Dict[str,int], candidates):
@@ -202,8 +200,8 @@ def k_itemset_from_candidates(data: Dict[str,int], candidates):
     out = []
     for combo in candidates:
         freq = min(data[c] for c in combo)
-        support = freq/total if total>0 else 0
-        out.append((combo, freq, support, support>=MIN_SUPPORT))
+        support = freq / total if total > 0 else 0
+        out.append((combo, freq, support, support >= MIN_SUPPORT))
     return out
 
 def apriori_generate_candidates(prev_frequents, k):
@@ -213,25 +211,21 @@ def apriori_generate_candidates(prev_frequents, k):
     for i in range(len(prev_sorted)):
         for j in range(i+1, len(prev_sorted)):
             a, b = prev_sorted[i], prev_sorted[j]
-            if a[:k-2]==b[:k-2]:
+            if a[:k-2] == b[:k-2]:
                 new = tuple(sorted(set(a).union(b)))
-                if len(new)==k:
-                    all_subfreq = True
-                    for sub in combinations(new, k-1):
-                        if tuple(sorted(sub)) not in prev_sorted:
-                            all_subfreq = False
-                            break
-                    if all_subfreq:
+                if len(new) == k:
+                    if all(tuple(sorted(sub)) in prev_sorted for sub in combinations(new, k-1)):
                         candidates.add(new)
     return sorted(candidates)
 
 def apriori_to_rows(data: Dict[str,int], k: int):
-    if k==1:
+    if k == 1:
         result = one_itemset(data)
     else:
         prev_rows, prev_freq = apriori_to_rows(data, k-1)
         candidates = apriori_generate_candidates(prev_freq, k)
         result = k_itemset_from_candidates(data, candidates)
+
     rows = []
     frequents = []
     total = data["TOTAL"]
@@ -259,7 +253,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("♻️ Data berhasil direset.")
-    return ConversationHandler.END 
+    return ConversationHandler.END
 
 async def input_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["data"] = {}
@@ -279,7 +273,6 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ASKING
     context.user_data["data"][field] = int(text)
 
-    # Validasi grup jika terakhir
     for g_idx, g in enumerate(GROUPS):
         if field in g:
             valid, msg = validate_group(context.user_data["data"], g_idx)
@@ -303,37 +296,27 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = ensure_validated_data(context)
     text = format_rekap_text(data)
     await update.message.reply_text(text)
-
-    # Export CSV/TXT
     export_rows_to_csv("rekap.csv", ["Item", "Jumlah"], rekap_rows_csv(data))
     export_text("rekap.txt", text)
 
-async def apriori1(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def apriori_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, k: int):
     data = ensure_validated_data(context)
-    rows, _ = apriori_to_rows(data, 1)
-    txt = "📊 1-Itemset (Support ≥ {:.0%})\n".format(MIN_SUPPORT)
+    rows, _ = apriori_to_rows(data, k)
+    txt = f"📊 {k}-Itemset (Support ≥ {MIN_SUPPORT:.0%})\n"
     for r in rows:
         txt += f"{r[0]} → {r[1]} ({r[2]})\n"
     await update.message.reply_text(txt)
-    export_text("apriori1.txt", txt)
+    export_text(f"apriori{k}.txt", txt)
+    export_rows_to_csv(f"apriori{k}.csv", ["Itemset", "Freq/Total=Support", "Frequent?"], rows)
+
+async def apriori1(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await apriori_handler(update, context, 1)
 
 async def apriori2(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = ensure_validated_data(context)
-    rows, _ = apriori_to_rows(data, 2)
-    txt = "📊 2-Itemset (Support ≥ {:.0%})\n".format(MIN_SUPPORT)
-    for r in rows:
-        txt += f"{r[0]} → {r[1]} ({r[2]})\n"
-    await update.message.reply_text(txt)
-    export_text("apriori2.txt", txt)
+    await apriori_handler(update, context, 2)
 
 async def apriori3(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = ensure_validated_data(context)
-    rows, _ = apriori_to_rows(data, 3)
-    txt = "📊 3-Itemset (Support ≥ {:.0%})\n".format(MIN_SUPPORT)
-    for r in rows:
-        txt += f"{r[0]} → {r[1]} ({r[2]})\n"
-    await update.message.reply_text(txt)
-    export_text("apriori3.txt", txt)
+    await apriori_handler(update, context, 3)
 
 # =========================
 # MAIN
@@ -343,9 +326,7 @@ def main():
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('input', input_start)],
-        states={
-            ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_handler)],
-        },
+        states={ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_handler)]},
         fallbacks=[CommandHandler('reset', reset)]
     )
 
