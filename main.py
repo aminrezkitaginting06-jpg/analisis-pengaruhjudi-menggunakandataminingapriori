@@ -224,23 +224,64 @@ async def input_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     fields = [k for g in GROUPS for k in g]
-    idx = context.user_data.get("field_idx",0)
+    idx = context.user_data.get("field_idx", 0)
     field = fields[idx]
 
     if not is_int_nonneg(text):
         await update.message.reply_text("❌ Harus angka positif. Coba lagi:")
         return ASKING
+
+    # Simpan input sementara
     context.user_data["data"][field] = int(text)
 
-    idx +=1
-    if idx>=len(fields):
-        await update.message.reply_text("✅ Semua data berhasil diinput!")
+    idx += 1
+    if idx >= len(fields):
+        data = context.user_data["data"]
+
+        # Validasi setiap kelompok kecuali ABJ
+        groups_to_check = [
+            ("JK1","JK2"),
+            ("UMR1","UMR2","UMR3","UMR4","UMR5"),
+            ("PT1","PT2","PT3","PT4"),
+            ("FBJ1","FBJ2","FBJ3","FBJ4"),
+            ("JJ1","JJ2","JJ3","JJ4"),
+            ("PDB1","PDB2","PDB3","PDB4"),
+            ("MK1","MK2"),
+            ("FB1","FB2","FB3","FB4"),
+            ("KJO1","KJO2"),
+            ("PJO1","PJO2")
+        ]
+
+        for group in groups_to_check:
+            if group != ("PJO1","PJO2"):
+                expected = sum(data[k] for k in group)
+                if expected != data["TOTAL"]:
+                    await update.message.reply_text(
+                        f"❌ Total untuk {', '.join(group)} ({expected}) tidak sama dengan TOTAL ({data['TOTAL']}).\n"
+                        "⚠️ Silakan periksa input Anda."
+                    )
+                    # Reset field_idx ke field pertama kelompok itu
+                    context.user_data["field_idx"] = fields.index(group[0])
+                    return ASKING
+
+        # Validasi ABJ (harus sama dengan PJO1)
+        abj_total = sum(data[k] for k in ["ABJ1","ABJ2","ABJ3","ABJ4","ABJ5"])
+        if abj_total != data["PJO1"]:
+            await update.message.reply_text(
+                f"❌ Total ABJ (1-5) = {abj_total} tidak sama dengan PJO1 ({data['PJO1']}).\n"
+                "⚠️ Silakan periksa input Anda."
+            )
+            context.user_data["field_idx"] = fields.index("ABJ1")
+            return ASKING
+
+        await update.message.reply_text("✅ Semua data berhasil diinput dan valid!")
         return ConversationHandler.END
 
-    context.user_data["field_idx"]=idx
+    # Lanjut ke field berikutnya
+    context.user_data["field_idx"] = idx
     await update.message.reply_text(FIELD_PROMPTS[fields[idx]])
     return ASKING
-
+    
 async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = ensure_validated_data(context)
     text = format_rekap_text(data)
