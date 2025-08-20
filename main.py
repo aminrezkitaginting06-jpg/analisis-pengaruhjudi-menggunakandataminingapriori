@@ -1,12 +1,12 @@
 import os
 import csv
 from itertools import combinations
-from typing import List, Tuple, Dict
+from typing import List, Dict
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ConversationHandler,
-    filters, ContextTypes
+    CallbackQueryHandler, filters, ContextTypes
 )
 
 # =========================
@@ -87,10 +87,7 @@ FIELD_PROMPTS = {
     "ABJ5": "🤥 Masukkan Ketidakjujuran Pasangan akibat Judi (ABJ5):"
 }
 
-# =========================
-# STATE Conversational
-# =========================
-ASKING = 1
+ASKING = 1  # state ConversationHandler
 
 # =========================
 # UTILS
@@ -107,8 +104,7 @@ def export_text(filename: str, content: str):
 
 def is_int_nonneg(text: str) -> bool:
     try:
-        v = int(text)
-        return v >= 0
+        return int(text) >= 0
     except:
         return False
 
@@ -200,16 +196,37 @@ def apriori_to_rows(data: Dict[str,int], k:int):
 # HANDLERS
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Halo! Bot siap.\n\n"
-        "/input → mulai input data\n"
-        "/rekap → tampil rekap data\n"
-        "/apriori1 → 1-itemset\n"
-        "/apriori2 → 2-itemset\n"
-        "/apriori3 → 3-itemset\n"
-        "/reset → reset data"
-    )
+    keyboard = [
+        [InlineKeyboardButton("📝 Input Data", callback_data='input')],
+        [InlineKeyboardButton("📋 Rekap Data", callback_data='rekap')],
+        [InlineKeyboardButton("1️⃣ Apriori 1-Itemset", callback_data='apriori1')],
+        [InlineKeyboardButton("2️⃣ Apriori 2-Itemset", callback_data='apriori2')],
+        [InlineKeyboardButton("3️⃣ Apriori 3-Itemset", callback_data='apriori3')],
+        [InlineKeyboardButton("♻️ Reset Data", callback_data='reset')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("👋 Halo! Pilih menu:", reply_markup=reply_markup)
 
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    cmd = query.data
+    if cmd=='input':
+        return await input_start(update, context)
+    elif cmd=='rekap':
+        await rekap(update, context)
+    elif cmd=='apriori1':
+        await apriori1(update, context)
+    elif cmd=='apriori2':
+        await apriori2(update, context)
+    elif cmd=='apriori3':
+        await apriori3(update, context)
+    elif cmd=='reset':
+        await reset(update, context)
+
+# =========================
+# INPUT HANDLER
+# =========================
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("♻️ Data berhasil direset.")
@@ -231,14 +248,12 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Harus angka positif. Coba lagi:")
         return ASKING
 
-    # Simpan input sementara
     context.user_data["data"][field] = int(text)
-
     idx += 1
+
     if idx >= len(fields):
         data = context.user_data["data"]
-
-        # Validasi setiap kelompok kecuali ABJ
+        # Validasi kelompok
         groups_to_check = [
             ("JK1","JK2"),
             ("UMR1","UMR2","UMR3","UMR4","UMR5"),
@@ -251,25 +266,19 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ("KJO1","KJO2"),
             ("PJO1","PJO2")
         ]
-
         for group in groups_to_check:
             if group != ("PJO1","PJO2"):
                 expected = sum(data[k] for k in group)
                 if expected != data["TOTAL"]:
                     await update.message.reply_text(
-                        f"❌ Total untuk {', '.join(group)} ({expected}) tidak sama dengan TOTAL ({data['TOTAL']}).\n"
-                        "⚠️ Silakan periksa input Anda."
+                        f"❌ Total untuk {', '.join(group)} ({expected}) tidak sama dengan TOTAL ({data['TOTAL']}).\n⚠️ Silakan periksa input Anda."
                     )
-                    # Reset field_idx ke field pertama kelompok itu
                     context.user_data["field_idx"] = fields.index(group[0])
                     return ASKING
-
-        # Validasi ABJ (harus sama dengan PJO1)
         abj_total = sum(data[k] for k in ["ABJ1","ABJ2","ABJ3","ABJ4","ABJ5"])
         if abj_total != data["PJO1"]:
             await update.message.reply_text(
-                f"❌ Total ABJ (1-5) = {abj_total} tidak sama dengan PJO1 ({data['PJO1']}).\n"
-                "⚠️ Silakan periksa input Anda."
+                f"❌ Total ABJ (1-5) = {abj_total} tidak sama dengan PJO1 ({data['PJO1']}).\n⚠️ Silakan periksa input Anda."
             )
             context.user_data["field_idx"] = fields.index("ABJ1")
             return ASKING
@@ -277,11 +286,13 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Semua data berhasil diinput dan valid!")
         return ConversationHandler.END
 
-    # Lanjut ke field berikutnya
     context.user_data["field_idx"] = idx
     await update.message.reply_text(FIELD_PROMPTS[fields[idx]])
     return ASKING
-    
+
+# =========================
+# REKAP / APRIORI HANDLERS
+# =========================
 async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = ensure_validated_data(context)
     text = format_rekap_text(data)
@@ -320,6 +331,10 @@ async def apriori3(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 # =========================
 def main():
+    # hapus webhook dulu supaya aman
+    bot = Bot(BOT_TOKEN)
+    bot.delete_webhook()
+
     application = Application.builder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
@@ -330,6 +345,7 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
+    application.add_handler(CallbackQueryHandler(menu_handler))
     application.add_handler(CommandHandler("rekap", rekap))
     application.add_handler(CommandHandler("apriori1", apriori1))
     application.add_handler(CommandHandler("apriori2", apriori2))
