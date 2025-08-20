@@ -12,7 +12,7 @@ from telegram.ext import (
 # =========================
 # KONFIG
 # =========================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8417540455:AAHowzwxGRwT1BTA5sC6vO1xkBhvMeBry7U"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAGMmOBEt3gcmeDKwC4PEARhTp-Bc8Fl-JQ"
 MIN_SUPPORT = 0.30
 
 # Urutan input & grup validasi
