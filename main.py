@@ -4,12 +4,11 @@ import csv
 from itertools import combinations
 from typing import List, Dict
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, ConversationHandler,
-    CallbackQueryHandler, filters, ContextTypes
+    Application, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ContextTypes, filters
 )
-
 from flask import Flask
 import threading
 
@@ -222,8 +221,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Halo! Bot sudah aktif di Render 🚀")
 
     async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Balas pesan user
     await update.message.reply_text(update.message.text)
-    
+
+    # Menu tombol
     keyboard = [
         [InlineKeyboardButton("📝 Input Data", callback_data='input')],
         [InlineKeyboardButton("📋 Rekap Data", callback_data='rekap')],
@@ -233,24 +234,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("♻️ Reset Data", callback_data='reset')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Kirim pesan dengan menu
     await update.message.reply_text("👋 Halo! Pilih menu:", reply_markup=reply_markup)
 
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================
+# HANDLER CALLBACK BUTTON
+# =========================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    cmd = query.data
-    if cmd=='input':
-        return await input_start(update, context)
-    elif cmd=='rekap':
-        await rekap(update, context)
-    elif cmd=='apriori1':
-        await apriori1(update, context)
-    elif cmd=='apriori2':
-        await apriori2(update, context)
-    elif cmd=='apriori3':
-        await apriori3(update, context)
-    elif cmd=='reset':
-        await reset(update, context)
+
+    if query.data == "input":
+        await query.edit_message_text("📌 Silakan masukkan data transaksi...")
+    elif query.data == "rekap":
+        await query.edit_message_text("📊 Berikut rekap data sementara...")
+    elif query.data == "apriori1":
+        await query.edit_message_text("🔎 Analisis Apriori 1-Itemset diproses...")
+    elif query.data == "apriori2":
+        await query.edit_message_text("🔎 Analisis Apriori 2-Itemset diproses...")
+    elif query.data == "apriori3":
+        await query.edit_message_text("🔎 Analisis Apriori 3-Itemset diproses...")
+    elif query.data == "reset":
+        await query.edit_message_text("♻️ Data berhasil di-reset!")
 
 # =========================
 # INPUT HANDLER
@@ -259,12 +265,8 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("♻️ Data berhasil direset.")
 
-async def input_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["data"] = {}
-    context.user_data["field_idx"] = 0
-    fields = [k for g in GROUPS for k in g]
-    await update.message.reply_text(FIELD_PROMPTS[fields[0]])
-    return ASKING
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await echo(update, context)
 
 async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -355,23 +357,35 @@ async def apriori3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt)
     export_text("apriori3.txt", txt)
 
+# =========================
+# FLASK UNTUK KEEP-ALIVE DI RENDER
+# =========================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
 
 # =========================
 # MAIN BOT
 # =========================
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    # Command /start
-    app.add_handler(CommandHandler("start", start))
+    # Handler
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    application.add_handler(CallbackQueryHandler(button_handler))
 
-    # Echo pesan text
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    # Jalankan Flask di thread lain
+    threading.Thread(target=run_flask).start()
 
-    # Jalanin Flask di thread terpisah
-    threading.Thread(target=lambda: server.run(host="0.0.0.0", port=PORT)).start()
+    # Jalankan BOT
+    application.run_polling()
 
-     app.run_polling()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
