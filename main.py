@@ -325,24 +325,50 @@ def apriori_to_rows(
 
     return rows, frequents
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 # =========================
 # HANDLERS
 # =========================
+def main_menu_keyboard():
+    keyboard = [
+        [
+            InlineKeyboardButton("📥 Input Data", callback_data="input"),
+            InlineKeyboardButton("📊 Rekap", callback_data="rekap"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Reset", callback_data="reset"),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Halo! Bot siap.\n\n"
-        "Perintah:\n"
-        "/input  → mulai input data responden (step-by-step + validasi)\n"
-        "/rekap  → tampilkan rekap & kirim rekap.csv + rekap.txt\n"
-        "/apriori1 → hasil 1-itemset (file CSV & TXT)\n"
-        "/apriori2 → hasil 2-itemset (dari frequent 1-item)\n"
-        "/apriori3 → hasil 3-itemset (dari frequent 2-item)\n"
-        "/reset  → hapus data & mulai ulang"
+        "👋 Halo! Bot siap digunakan.\n\n"
+        "Silakan pilih menu di bawah ini:",
+        reply_markup=main_menu_keyboard()
     )
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("🔄 Data kamu sudah direset. Ketik /input untuk mulai isi lagi.")
+    context.chat_data.clear()
+    await update.message.reply_text(
+        "🔄 Data kamu sudah direset. Pilih menu lagi:",
+        reply_markup=main_menu_keyboard()
+    )
+    return ConversationHandler.END
+
+# Handler untuk respon tombol
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "input":
+        return await input_start(update, context)
+    elif query.data == "rekap":
+        return await rekap(update, context)
+    elif query.data == "reset":
+        return await reset(update, context)
 
 def _all_fields_linear():
     fields = []
@@ -491,9 +517,8 @@ async def apriori2(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def apriori3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await apriori_generic(update, context, 3)
 
-# =========================
-# MAIN
-# =========================
+from telegram.ext import CallbackQueryHandler
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -506,7 +531,9 @@ def main():
         fallbacks=[CommandHandler("cancel", input_cancel)],
         name="input_conversation",
         persistent=False,
+        per_chat=True,
     )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(conv)
@@ -514,6 +541,9 @@ def main():
     app.add_handler(CommandHandler("apriori1", apriori1))
     app.add_handler(CommandHandler("apriori2", apriori2))
     app.add_handler(CommandHandler("apriori3", apriori3))
+
+    # Handler tombol inline
+    app.add_handler(CallbackQueryHandler(button_handler))
 
     app.run_polling()
 
