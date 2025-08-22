@@ -14,7 +14,6 @@ from telegram.ext import (
 # KONFIG
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAGMmOBEt3gcmeDKwC4PEARhTp-Bc8Fl-JQ"
-RULE_TARGETS = [k for g in GROUPS for k in g if k != "TOTAL"]
 MIN_SUPPORT_1_4 = 0.30
 MIN_SUPPORT_5 = 0.35
 MIN_CONFIDENCE = 0.80
@@ -31,6 +30,8 @@ GROUPS = [
     ("PJO1", "PJO2"),
     ("ABJ1", "ABJ2", "ABJ3", "ABJ4", "ABJ5"),
 ]
+
+RULE_TARGETS = [k for g in GROUPS for k in g if k != "TOTAL"]
 
 # Emoji + label
 ITEM_LABELS = {
