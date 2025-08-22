@@ -2,7 +2,8 @@ import os
 import csv
 from itertools import combinations
 from typing import List, Tuple, Dict
-
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import CallbackQueryHandler
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ConversationHandler,
@@ -13,6 +14,7 @@ from telegram.ext import (
 # KONFIG
 # =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAGMmOBEt3gcmeDKwC4PEARhTp-Bc8Fl-JQ"
+RULE_TARGETS = [k for g in GROUPS for k in g if k != "TOTAL"]
 MIN_SUPPORT_1_4 = 0.30
 MIN_SUPPORT_5 = 0.35
 MIN_CONFIDENCE = 0.80
@@ -168,20 +170,115 @@ def apriori(data:Dict[str,int], k:int) -> List[Tuple[Tuple[str,...],int,float]]:
     candidates=apriori_generate_candidates(prev_freq,k)
     return k_itemset_from_candidates(data,candidates,min_support)
 
-# =========================
-# RULE CONFIDENCE
-# =========================
-def generate_rules(frequent_itemsets: List[Tuple[Tuple[str,...],int,float]], data:Dict[str,int]) -> List[Tuple[str,str,float,float]]:
-    """Hanya untuk 5-itemset ke PJO1 sebagai contoh"""
-    rules=[]
-    pjo1_count=data["PJO1"]
-    for combo,freq,support in frequent_itemsets:
-        if "PJO1" in combo: # target
-            antecedent=[c for c in combo if c!="PJO1"]
-            conf=freq/pjo1_count if pjo1_count>0 else 0
-            if conf>=MIN_CONFIDENCE:
-                rules.append((" + ".join([ITEM_LABELS[a] for a in antecedent]), ITEM_LABELS["PJO1"], support, conf))
-    return rules
+async def rules_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = []
+    row = []
+    for i, target in enumerate(RULE_TARGETS):
+        row.append(InlineKeyboardButton(ITEM_LABELS.get(target, target), callback_data=f"rule_target_{target}"))
+        if (i + 1) % 3 == 0:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    await update.message.reply_text(
+        "📊 Pilih target untuk menampilkan aturan asosiasi (confidence ≥80%):",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# Handler tombol inline keyboard
+async def rules_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("rule_target_"):
+        target = data[len("rule_target_"):]
+        d = ensure_data(context)
+
+        if target not in d or target == "TOTAL":
+            await query.edit_message_text("❌ Target tidak valid.")
+            return
+
+        freq_itemsets = apriori(d, 5)
+        rules = generate_rules(freq_itemsets, d, target)
+
+        if not rules:
+            await query.edit_message_text(
+                f"📊 Tidak ditemukan aturan asosiasi untuk target {ITEM_LABELS.get(target, target)} dengan confidence ≥80%."
+            )
+            return
+
+        # Export ke TXT dan CSV
+        text_rules = "\n\n".join([
+            f"Jika {r[0]} → Maka {r[1]} (Support={r[2]:.2f}, Confidence={r[3]:.2f})\n{interpret_rule(r[0], r[1], r[2], r[3])}"
+            for r in rules
+        ])
+        export_text("rules.txt", f"📊 Rules untuk target {ITEM_LABELS.get(target, target)}:\n\n{text_rules}")
+
+        csv_rows = [[r[0], r[1], f"{r[2]:.4f}", f"{r[3]:.4f}"] for r in rules]
+        export_rows_to_csv("rules.csv", ["Antecedent", "Consequent", "Support", "Confidence"], csv_rows)
+
+        # Preview max 10 rules
+        preview_rules = rules[:10]
+        preview_text = "\n\n".join([
+            f"Jika {r[0]} → Maka {r[1]} (Support={r[2]:.2f}, Confidence={r[3]:.2f})"
+            for r in preview_rules
+        ])
+        if len(rules) > 10:
+            preview_text += f"\n\n📄 {len(rules) - 10} aturan lainnya ada di file terlampir."
+
+        await query.edit_message_text(f"📊 Aturan Asosiasi untuk {ITEM_LABELS.get(target, target)}:\n\n{preview_text}")
+
+        # Kirim file aturan ke user secara private
+        await context.bot.send_document(query.from_user.id, open("rules.txt", "rb"))
+        await context.bot.send_document(query.from_user.id, open("rules.csv", "rb"))
+
+
+# Modifikasi handler /rules jadi wrapper
+async def rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if args:
+        # Kalau ada argumen target langsung proses
+        target = args[0].upper()
+        d = ensure_data(context)
+        if target not in d or target == "TOTAL":
+            await update.message.reply_text("❌ Target tidak valid. Contoh: /rules PJO1")
+            return
+
+        freq_itemsets = apriori(d, 5)
+        rules = generate_rules(freq_itemsets, d, target)
+
+        if not rules:
+            await update.message.reply_text(
+                f"📊 Tidak ditemukan aturan asosiasi untuk target {ITEM_LABELS.get(target, target)} dengan confidence ≥80%."
+            )
+            return
+
+        text_rules = "\n\n".join([
+            f"Jika {r[0]} → Maka {r[1]} (Support={r[2]:.2f}, Confidence={r[3]:.2f})\n{interpret_rule(r[0], r[1], r[2], r[3])}"
+            for r in rules
+        ])
+        export_text("rules.txt", f"📊 Rules untuk target {ITEM_LABELS.get(target, target)}:\n\n{text_rules}")
+
+        csv_rows = [[r[0], r[1], f"{r[2]:.4f}", f"{r[3]:.4f}"] for r in rules]
+        export_rows_to_csv("rules.csv", ["Antecedent", "Consequent", "Support", "Confidence"], csv_rows)
+
+        preview_rules = rules[:10]
+        preview_text = "\n\n".join([
+            f"Jika {r[0]} → Maka {r[1]} (Support={r[2]:.2f}, Confidence={r[3]:.2f})"
+            for r in preview_rules
+        ])
+        if len(rules) > 10:
+            preview_text += f"\n\n📄 {len(rules) - 10} aturan lainnya ada di file terlampir."
+
+        await update.message.reply_text(f"📊 Aturan Asosiasi untuk {ITEM_LABELS.get(target, target)}:\n\n{preview_text}")
+        await update.message.reply_document(open("rules.txt", "rb"))
+        await update.message.reply_document(open("rules.csv", "rb"))
+
+    else:
+        # Kalau tidak ada argumen, tampilkan tombol pilih target
+        await rules_start(update, context)
 
 # =========================
 # HANDLER
@@ -289,27 +386,31 @@ async def apriori3(update,context): await apriori_handler(update,context,3)
 async def apriori4(update,context): await apriori_handler(update,context,4)
 async def apriori5(update,context): await apriori_handler(update,context,5)
 
-# =========================
-# MAIN
-# =========================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
+
     conv = ConversationHandler(
         entry_points=[CommandHandler("input", input_start)],
-        states={ASKING:[MessageHandler(filters.TEXT&~filters.COMMAND,input_ask)]},
+        states={ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, input_ask)]},
         fallbacks=[CommandHandler("cancel", input_cancel)],
-        name="input_conversation", persistent=False
+        name="input_conversation",
+        persistent=False
     )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(conv)
     app.add_handler(CommandHandler("rekap", rekap))
-    app.add_handler(CommandHandler("apriori1",apriori1))
-    app.add_handler(CommandHandler("apriori2",apriori2))
-    app.add_handler(CommandHandler("apriori3",apriori3))
-    app.add_handler(CommandHandler("apriori4",apriori4))
-    app.add_handler(CommandHandler("apriori5",apriori5))
+    app.add_handler(CommandHandler("apriori1", apriori1))
+    app.add_handler(CommandHandler("apriori2", apriori2))
+    app.add_handler(CommandHandler("apriori3", apriori3))
+    app.add_handler(CommandHandler("apriori4", apriori4))
+    app.add_handler(CommandHandler("apriori5", apriori5))
+    app.add_handler(CommandHandler("rules", rules))
+    app.add_handler(CallbackQueryHandler(rules_button, pattern=r"^rule_target_"))
+
     app.run_polling()
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main()
