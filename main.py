@@ -24,7 +24,7 @@ from telegram.ext import (
 # =========================
 # KONFIGURASI
 # =========================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAG4TChMmiyG5teVNcn4-zMWOwL7mlMmMd0"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAGMmOBEt3gcmeDKwC4PEARhTp-Bc8Fl-JQ"
 
 MIN_SUPPORT_1_4 = 0.30
 MIN_SUPPORT_5 = 0.35
@@ -330,7 +330,7 @@ def fields_in_order() -> List[str]:
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = ReplyKeyboardMarkup(
-        [["/input", "/rekap"], ["/apriori1", "/apriori2", "/apriori3"], ["/apriori4", "/apriori5"], ["/rules", "/reset"]],
+        [["/input", "/rekap"], ["/apriori2", "/apriori3"], ["/apriori4", "/apriori5"], ["/rules", "/reset"]],
         resize_keyboard=True
     )
     await update.message.reply_text(
@@ -341,7 +341,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Perintah juga tersedia via /help:\n"
         "/input → pilih mode Manual/Otomatis (CSV)\n"
         "/rekap → ringkasan data\n"
-        "/apriori1..5 → frequent itemsets\n"
+        "/apriori2..5 → frequent itemsets\n"
         "/rules [TARGET] → asosiasi (default PJO1)\n"
         "/reset → kosongkan data",
     )
@@ -634,7 +634,6 @@ async def apriori_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, k:
             await update.message.reply_text("📊 Rule Mining: Tidak ditemukan aturan dengan confidence ≥80%.")
 
 # Wrapper command handlers
-async def apriori1(update, context): await apriori_handler(update, context, 1)
 async def apriori2(update, context): await apriori_handler(update, context, 2)
 async def apriori3(update, context): await apriori_handler(update, context, 3)
 async def apriori4(update, context): await apriori_handler(update, context, 4)
@@ -771,7 +770,6 @@ def main():
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(conv)
     app.add_handler(CommandHandler("rekap", rekap))
-    app.add_handler(commandHandler("apriori1", apriori1))
     app.add_handler(CommandHandler("apriori2", apriori2))
     app.add_handler(CommandHandler("apriori3", apriori3))
     app.add_handler(CommandHandler("apriori4", apriori4))
