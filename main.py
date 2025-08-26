@@ -571,9 +571,31 @@ def top_n_itemsets(itemsets: List[Tuple[Tuple[str, ...], int, float]], n: int = 
 
 async def apriori_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, k: int):
     d = ensure_data(context)
+    rows = []
+    freq_itemsets = apriori(d, k)
+    
     if d.get("TOTAL", 0) <= 0:
         await update.message.reply_text("❌ TOTAL belum diisi atau 0. Input data dulu via /input.")
         return
+        
+    if k == 1:
+        # Tampilkan detail perhitungan untuk setiap item
+        total = d["TOTAL"]
+        lines = []
+        for combo, freq, support in freq_itemsets:
+            item = ITEM_LABELS[combo[0]]
+            lines.append(f"{item} = {freq}/{total} = {support:.2f} ({support*100:.2f}%)")
+            rows.append([item, f"{freq}/{total} = {support:.4f}"])
+        text = "\n".join(lines) or "Tidak ada"
+        await update.message.reply_text(f"📊 1-Itemset (Perhitungan Support):\n{text}")
+    else:
+        for combo, freq, support in freq_itemsets:
+            rows.append([
+                " + ".join([ITEM_LABELS[c] for c in combo]),
+                f"{freq}/{d['TOTAL']} = {support:.2f}"
+            ])
+        text = "\n".join([f"{r[0]} → {r[1]}" for r in rows[:30]]) or "Tidak ada"
+        await update.message.reply_text(f"📊 {k}-Itemset:\n{text}")
 
     freq_itemsets = apriori(d, k)
     # rows untuk file lengkap
