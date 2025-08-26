@@ -24,7 +24,7 @@ from telegram.ext import (
 # =========================
 # KONFIGURASI
 # =========================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAGMmOBEt3gcmeDKwC4PEARhTp-Bc8Fl-JQ"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8304855655:AAG4TChMmiyG5teVNcn4-zMWOwL7mlMmMd0"
 
 MIN_SUPPORT_1_4 = 0.30
 MIN_SUPPORT_5 = 0.35
@@ -330,7 +330,7 @@ def fields_in_order() -> List[str]:
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = ReplyKeyboardMarkup(
-        [["/input", "/rekap"], ["/apriori2", "/apriori3"], ["/apriori4", "/apriori5"], ["/rules", "/reset"]],
+        [["/input", "/rekap"], ["/apriori1", "/apriori2", "/apriori3"], ["/apriori4", "/apriori5"], ["/rules", "/reset"]],
         resize_keyboard=True
     )
     await update.message.reply_text(
@@ -341,7 +341,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Perintah juga tersedia via /help:\n"
         "/input → pilih mode Manual/Otomatis (CSV)\n"
         "/rekap → ringkasan data\n"
-        "/apriori2..5 → frequent itemsets\n"
+        "/apriori1..5 → frequent itemsets\n"
         "/rules [TARGET] → asosiasi (default PJO1)\n"
         "/reset → kosongkan data",
     )
@@ -571,31 +571,9 @@ def top_n_itemsets(itemsets: List[Tuple[Tuple[str, ...], int, float]], n: int = 
 
 async def apriori_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, k: int):
     d = ensure_data(context)
-    rows = []
-    freq_itemsets = apriori(d, k)
-    
     if d.get("TOTAL", 0) <= 0:
         await update.message.reply_text("❌ TOTAL belum diisi atau 0. Input data dulu via /input.")
         return
-        
-    if k == 1:
-        # Tampilkan detail perhitungan untuk setiap item
-        total = d["TOTAL"]
-        lines = []
-        for combo, freq, support in freq_itemsets:
-            item = ITEM_LABELS[combo[0]]
-            lines.append(f"{item} = {freq}/{total} = {support:.2f} ({support*100:.2f}%)")
-            rows.append([item, f"{freq}/{total} = {support:.4f}"])
-        text = "\n".join(lines) or "Tidak ada"
-        await update.message.reply_text(f"📊 1-Itemset (Perhitungan Support):\n{text}")
-    else:
-        for combo, freq, support in freq_itemsets:
-            rows.append([
-                " + ".join([ITEM_LABELS[c] for c in combo]),
-                f"{freq}/{d['TOTAL']} = {support:.2f}"
-            ])
-        text = "\n".join([f"{r[0]} → {r[1]}" for r in rows[:30]]) or "Tidak ada"
-        await update.message.reply_text(f"📊 {k}-Itemset:\n{text}")
 
     freq_itemsets = apriori(d, k)
     # rows untuk file lengkap
@@ -656,6 +634,7 @@ async def apriori_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, k:
             await update.message.reply_text("📊 Rule Mining: Tidak ditemukan aturan dengan confidence ≥80%.")
 
 # Wrapper command handlers
+async def apriori1(update, context): await apriori_handler(update, context, 1)
 async def apriori2(update, context): await apriori_handler(update, context, 2)
 async def apriori3(update, context): await apriori_handler(update, context, 3)
 async def apriori4(update, context): await apriori_handler(update, context, 4)
@@ -792,6 +771,7 @@ def main():
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(conv)
     app.add_handler(CommandHandler("rekap", rekap))
+    app.add_handler(commandHandler("apriori1", apriori1))
     app.add_handler(CommandHandler("apriori2", apriori2))
     app.add_handler(CommandHandler("apriori3", apriori3))
     app.add_handler(CommandHandler("apriori4", apriori4))
